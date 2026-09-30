@@ -4,6 +4,9 @@ namespace webdna\typesensesync\services;
 
 use Craft;
 use craft\base\Component;
+use craft\helpers\DateTimeHelper;
+use craft\helpers\Db;
+use DateTime;
 use Throwable;
 use Typesense\Client as TypesenseClient;
 use Typesense\Exceptions\ObjectNotFound;
@@ -232,12 +235,13 @@ class Collections extends Component
         }
 
         $current = [];
+        $settings = $this->settings();
         foreach ((array)($live['fields'] ?? []) as $field) {
             $name = (string)($field['name'] ?? '');
 
             // Typesense adds the flattened fields of a nested object itself (`address.city`, `.*`).
             if ($name !== '' && !str_contains($name, '.')) {
-                $current[$name] = self::normalise($field);
+                $current[$name] = self::normalise($this->aliasedReference($field, $settings));
             }
         }
 
@@ -402,6 +406,405 @@ class Collections extends Component
     }
 
     /**
+     * Rebuild a collection as its next version and move search onto it, then do the same for
+     * every collection that joins into it (BR-15).
+     *
+     * Typesense binds a reference to the physical collection behind an alias, while a joined
+     * search names the alias, so a join from a collection built against the old version finds
+     * nothing once the alias moves. Every collection in the run is therefore built first, in
+     * reference order, each dependant referencing the new *physical* versions of what it joins
+     * into; only then are the aliases swapped, back to back, so joins answer throughout.
+     *
+     * Each `<name>_<n+1>` is populated by a reindex while its alias keeps serving `<name>_<n>`.
+     * If any build fails, every new version is deleted and no alias has moved. After the swaps,
+     * every element updated or trashed since its build began is synced again, because the sync
+     * its save queued may have written to the old version; then the old versions are dropped.
+     *
+     * @param callable(string, int, string): void|null $progress Called during each build with the
+     * collection handle, the documents written so far and the target being walked.
+     * @return list<array{collection: string, from: ?string, to: string, indexed: int, rejected: int,
+     *     resynced: int, dropped: ?string}> One entry per collection rebuilt, in the order rebuilt.
+     * @throws SyncException when a build fails; nothing has then changed.
+     * @throws InvalidConfigException when the config has problems (BR-4), including a cycle.
+     */
+    public function recreate(string $collection, ?callable $progress = null): array
+    {
+        $this->config($collection);
+        $problems = $this->settings()->getProblems();
+
+        if ($problems !== []) {
+            throw new InvalidConfigException(sprintf(
+                'Nothing was recreated: the config has problems. %s',
+                implode(' ', $problems),
+            ));
+        }
+
+        $plan = [$collection, ...$this->getDependants($collection)];
+        $mutex = Craft::$app->getMutex();
+        $locked = [];
+
+        try {
+            foreach ($plan as $handle) {
+                if (!$mutex->acquire($this->lockName($handle))) {
+                    throw new SyncException(sprintf('Nothing was recreated: "%s" is already being recreated.', $handle));
+                }
+
+                $locked[] = $handle;
+            }
+
+            return $this->recreatePlan($plan, $progress);
+        } finally {
+            foreach ($locked as $handle) {
+                $mutex->release($this->lockName($handle));
+            }
+        }
+    }
+
+    /**
+     * The collections that hold a reference into this one, by handle.
+     *
+     * @return string[]
+     * @throws InvalidConfigException
+     */
+    public function referencingCollections(string $collection): array
+    {
+        $handles = [];
+
+        foreach (array_keys($this->settings()->getCollectionConfigs()) as $handle) {
+            if ($handle !== $collection && in_array($collection, $this->referencedBy($handle), true)) {
+                $handles[] = $handle;
+            }
+        }
+
+        return $handles;
+    }
+
+    /**
+     * Every collection that joins into this one, directly or through another, in the order a
+     * recreate rebuilds them: each after every collection it references.
+     *
+     * @return string[]
+     * @throws InvalidConfigException when the references form a cycle, which no order satisfies.
+     */
+    public function getDependants(string $collection): array
+    {
+        $found = [];
+        $pending = [$collection];
+
+        while ($pending !== []) {
+            foreach ($this->referencingCollections((string)array_shift($pending)) as $handle) {
+                if ($handle !== $collection && !isset($found[$handle])) {
+                    $found[$handle] = true;
+                    $pending[] = $handle;
+                }
+            }
+        }
+
+        // Rebuild a collection only once everything it references in this run is rebuilt.
+        $inRun = [$collection, ...array_keys($found)];
+        $order = [];
+        $done = [$collection];
+        $left = array_keys($found);
+
+        while ($left !== []) {
+            $ready = array_values(array_filter(
+                $left,
+                fn(string $handle) => array_diff(array_intersect($this->referencedBy($handle), $inRun), $done) === [],
+            ));
+
+            if ($ready === []) {
+                throw new InvalidConfigException(sprintf(
+                    'Collections reference each other in a cycle (%s), so no recreate order exists.',
+                    implode(', ', $left),
+                ));
+            }
+
+            array_push($order, ...$ready);
+            array_push($done, ...$ready);
+            $left = array_values(array_diff($left, $ready));
+        }
+
+        return $order;
+    }
+
+    /**
+     * Build every version in the plan, then swap them all in, re-sync, and drop the old ones.
+     *
+     * @param string[] $plan The collection first, then its dependants in reference order.
+     * @param callable(string, int, string): void|null $progress
+     * @return list<array{collection: string, from: ?string, to: string, indexed: int, rejected: int,
+     *     resynced: int, dropped: ?string}>
+     * @throws SyncException
+     * @throws InvalidConfigException
+     */
+    private function recreatePlan(array $plan, ?callable $progress): array
+    {
+        $builds = [];
+        // Live name => the new physical version, for the references of the collections after it.
+        $versions = [];
+
+        try {
+            foreach ($plan as $handle) {
+                $build = $this->build($handle, $versions, $progress);
+                $builds[] = $build;
+                $versions[$build['alias']] = $build['to'];
+            }
+        } catch (SyncException|InvalidConfigException $e) {
+            // No alias has moved, so every version this run made can go.
+            foreach ($builds as $build) {
+                $this->deleteQuietly($build['to']);
+            }
+
+            if ($builds !== []) {
+                $e = $this->failure(sprintf(
+                    'Nothing was recreated; %s built for this run %s deleted',
+                    implode(', ', array_column($builds, 'to')),
+                    count($builds) === 1 ? 'was' : 'were',
+                ), $e);
+            }
+
+            throw $e;
+        }
+
+        // Back to back, in reference order: until the last swap, a join from a new version
+        // through the alias of an old one finds nothing.
+        foreach ($builds as $build) {
+            try {
+                $this->client()->aliases->upsert($build['alias'], ['collection_name' => $build['to']]);
+            } catch (Throwable $e) {
+                throw $this->failure(sprintf(
+                    'Could not point %s at %s; the aliases before it were swapped (%s). Recreate "%s" again',
+                    $build['alias'],
+                    $build['to'],
+                    implode(', ', array_column(array_slice($builds, 0, (int)array_search($build, $builds, true)), 'alias')) ?: 'none',
+                    $plan[0],
+                ), $e);
+            }
+        }
+
+        $results = [];
+
+        foreach ($builds as $build) {
+            $results[] = [
+                'collection' => $build['collection'],
+                'from' => $build['from'],
+                'to' => $build['to'],
+                'indexed' => $build['indexed'],
+                'rejected' => $build['rejected'],
+                'resynced' => $this->resyncSince($build['collection'], $build['since']),
+                'dropped' => null,
+            ];
+        }
+
+        // Dependants first, so nothing is left referencing a collection that has gone.
+        foreach (array_reverse(array_keys($results)) as $index) {
+            $results[$index]['dropped'] = $this->dropOldVersions($results[$index]['collection'], $results[$index]['to']);
+        }
+
+        return $results;
+    }
+
+    /**
+     * Create and populate the next version of one collection beside the live one. The alias is
+     * not moved.
+     *
+     * @param array<string, string> $versions Live name => physical version to reference instead,
+     * for collections rebuilt earlier in the run.
+     * @param callable(string, int, string): void|null $progress
+     * @return array{collection: string, alias: string, from: ?string, to: string, indexed: int, rejected: int, since: DateTime}
+     * @throws SyncException when the build fails; the new version has then been deleted.
+     * @throws InvalidConfigException
+     */
+    private function build(string $collection, array $versions, ?callable $progress): array
+    {
+        $alias = $this->config($collection)->getName();
+
+        if ($this->getDesiredFields($collection) === []) {
+            throw new SyncException(sprintf('Nothing enabled routes into "%s", so there is nothing to recreate it from.', $collection));
+        }
+
+        $previous = $this->getActiveCollectionName($collection);
+        $existing = $this->listCollectionNames();
+
+        if ($previous === null && in_array($alias, $existing, true)) {
+            throw new SyncException(sprintf('A collection named "%s" already exists and is not an alias, so "%s" cannot be recreated behind it.', $alias, $collection));
+        }
+
+        $liveDocuments = $previous !== null ? $this->documentCount($previous) : 0;
+        $schema = $this->buildSchema($collection, $this->nextVersion($collection, $existing));
+        $schema['fields'] = array_map(static function(array $field) use ($versions): array {
+            $reference = (string)($field['reference'] ?? '');
+            $joined = strstr($reference, '.', true);
+
+            if ($joined !== false && isset($versions[$joined])) {
+                $field['reference'] = $versions[$joined] . substr($reference, strlen($joined));
+            }
+
+            return $field;
+        }, $schema['fields']);
+        $name = (string)$schema['name'];
+        // Second precision in the database, so step back one: re-syncing too much is harmless.
+        $since = DateTimeHelper::now()->modify('-1 second');
+
+        try {
+            $this->client()->collections->create($schema);
+        } catch (Throwable $e) {
+            throw $this->failure(sprintf('Could not create "%s"', $name), $e);
+        }
+
+        try {
+            $run = $this->sync()->reindex($collection, $name, $progress === null ? null : static function(int $indexed, string $target) use ($progress, $collection): void {
+                $progress($collection, $indexed, $target);
+            });
+
+            if ($run['failed'] > 0) {
+                throw new SyncException(sprintf('%d documents could not be written to %s', $run['failed'], $name));
+            }
+
+            // The same guard as a prune on an empty run: a broken query must not empty search.
+            if ($run['ids'] === [] && $liveDocuments > 0) {
+                throw new SyncException(sprintf('the build made no documents, while %s holds %d', $previous, $liveDocuments));
+            }
+        } catch (Throwable $e) {
+            $this->deleteQuietly($name);
+
+            throw $this->failure(sprintf('Could not build "%s"; %s was deleted and %s still serves %s', $collection, $name, $alias, $previous ?? 'nothing'), $e);
+        }
+
+        return [
+            'collection' => $collection,
+            'alias' => $alias,
+            'from' => $previous,
+            'to' => $name,
+            'indexed' => $run['indexed'],
+            'rejected' => $run['rejected'],
+            'since' => $since,
+        ];
+    }
+
+    /**
+     * Delete a collection this run made, logging rather than throwing if it cannot be.
+     */
+    private function deleteQuietly(string $name): void
+    {
+        try {
+            $this->client()->collections[$name]->delete();
+        } catch (Throwable $e) {
+            Craft::warning(sprintf('Could not delete the unfinished %s: %s', $name, $e->getMessage()), TypesenseSync::HANDLE);
+        }
+    }
+
+    /**
+     * Sync again every element of a collection's targets updated or trashed since a moment, now
+     * that the alias points at the new version. Their queued syncs may have run during the build
+     * and written to the old one.
+     *
+     * @return int Elements synced.
+     */
+    private function resyncSince(string $collection, DateTime $since): int
+    {
+        $sync = $this->sync();
+        $synced = 0;
+
+        foreach ($this->settings()->getTargetsForCollection($collection) as $target) {
+            $queries = [
+                $sync->queryForTarget($target)?->dateUpdated('>= ' . $since->format(DateTime::ATOM)),
+                $sync->queryForTarget($target)?->trashed(true)->andWhere(['>=', 'elements.dateDeleted', Db::prepareDateForDb($since)]),
+            ];
+
+            foreach ($queries as $query) {
+                foreach ($query?->all() ?? [] as $element) {
+                    try {
+                        $sync->syncElement($element);
+                        $synced++;
+                    } catch (Throwable $e) {
+                        Craft::error(sprintf('Element %s was not re-synced into the recreated "%s": %s', $element->id, $collection, $e->getMessage()), TypesenseSync::HANDLE);
+                    }
+                }
+            }
+        }
+
+        return $synced;
+    }
+
+    /**
+     * Delete every version of a collection except the one given, including any a failed run left
+     * behind. A failure is logged, not thrown: search already uses the new version.
+     *
+     * @return string|null The first version dropped, or null when none was.
+     */
+    private function dropOldVersions(string $collection, string $keep): ?string
+    {
+        $config = $this->config($collection);
+        $dropped = null;
+
+        try {
+            $names = $this->listCollectionNames();
+        } catch (SyncException $e) {
+            Craft::warning(sprintf('Old versions of "%s" were not dropped: %s', $collection, $e->getMessage()), TypesenseSync::HANDLE);
+
+            return null;
+        }
+
+        foreach ($names as $name) {
+            if ($name === $keep || $config->getVersionFromName($name) === null) {
+                continue;
+            }
+
+            try {
+                $this->client()->collections[$name]->delete();
+                $dropped ??= $name;
+            } catch (Throwable $e) {
+                Craft::warning(sprintf('Could not drop the old collection %s: %s', $name, $e->getMessage()), TypesenseSync::HANDLE);
+            }
+        }
+
+        return $dropped;
+    }
+
+    /**
+     * Handles of the other declared collections this one's desired schema references.
+     *
+     * @return string[]
+     * @throws InvalidConfigException
+     */
+    private function referencedBy(string $collection): array
+    {
+        $handlesByName = array_flip($this->settings()->getLiveNames());
+        $referenced = [];
+
+        foreach ($this->getDesiredFields($collection) as $field) {
+            $reference = (string)($field['reference'] ?? '');
+            $target = $handlesByName[strstr($reference, '.', true) ?: $reference] ?? null;
+
+            if ($reference !== '' && $target !== null && $target !== $collection) {
+                $referenced[$target] = true;
+            }
+        }
+
+        return array_keys($referenced);
+    }
+
+    /**
+     * @throws SyncException
+     */
+    private function documentCount(string $name): int
+    {
+        try {
+            return (int)($this->client()->collections[$name]->retrieve()['num_documents'] ?? 0);
+        } catch (ObjectNotFound) {
+            return 0;
+        } catch (Throwable $e) {
+            throw $this->failure(sprintf('Could not read collection "%s"', $name), $e);
+        }
+    }
+
+    private function lockName(string $collection): string
+    {
+        return TypesenseSync::HANDLE . ':recreate:' . $collection;
+    }
+
+    /**
      * The next unused version number: one past the highest on the server, alias or not, so a
      * version left behind by a failed run is never reused.
      *
@@ -455,6 +858,33 @@ class Collections extends Component
         }
 
         return $normalised;
+    }
+
+    /**
+     * A retrieved field whose reference names a version of a declared collection (as a recreate
+     * builds its dependants: `people_2.id`), rewritten to name the live alias (`people.id`), which
+     * is what the declaration says.
+     *
+     * @param array<string, mixed> $field
+     * @return array<string, mixed>
+     */
+    private function aliasedReference(array $field, Settings $settings): array
+    {
+        $reference = (string)($field['reference'] ?? '');
+        $joined = strstr($reference, '.', true);
+
+        if ($joined === false) {
+            return $field;
+        }
+
+        foreach ($settings->getCollectionConfigs() as $config) {
+            if ($config->hasName() && $config->getVersionFromName($joined) !== null) {
+                $field['reference'] = $config->getName() . substr($reference, strlen($joined));
+                break;
+            }
+        }
+
+        return $field;
     }
 
     /**
@@ -516,6 +946,11 @@ class Collections extends Component
         Craft::error($message, TypesenseSync::HANDLE);
 
         return new SyncException($message, 0, $e);
+    }
+
+    private function sync(): Sync
+    {
+        return TypesenseSync::getInstance()->sync;
     }
 
     private function targets(): Targets

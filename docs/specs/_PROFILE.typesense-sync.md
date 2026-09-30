@@ -93,7 +93,11 @@ docker compose run --rm php composer validate --strict --no-plugins
 - **Typesense binds a reference field to the *versioned* collection behind an alias, not to the
   alias.** Recreating a referenced collection alone breaks every join into it ("No reference field
   found") until the referencing collections are rebuilt too. Recreate dependants, in order, in the
-  same run.
+  same run. **Keeping the old version does not keep the join:** a joined search names the alias
+  (`$people(title)`), so the moment `people` points at `people_2` a join from a collection bound to
+  `people_1` returns nothing. Build dependants against the new *physical* name (`people_2.id`) and
+  swap every alias only once all are built — and expect the retrieved reference to read
+  `people_2.id`, not the alias (verified on 30.0, 30 Sep 2026).
 - **`typesense-php` v6 ignores `connection_timeout_seconds`.** Timeouts must be set on the Guzzle
   client handed to it, or an unreachable cluster hangs a CP request or a queue worker for the PHP
   default.

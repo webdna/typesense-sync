@@ -8,6 +8,7 @@ use webdna\typesensesync\errors\SyncException;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\services\Client;
 use webdna\typesensesync\services\Collections;
+use webdna\typesensesync\tests\fixtures\formatters\BackReferencingFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\ConflictingFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\EventsFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\NewsFormatter;
@@ -324,7 +325,59 @@ class CollectionsTest extends Unit
         $this->assertSame([], $this->http->history);
     }
 
+    // Recreate order (BR-15) --------------------------------------------------------------------
+
+    public function testDependantsAreEveryCollectionJoiningInDirectlyOrNotInReferenceOrder(): void
+    {
+        // digest → posts → people: a rebuild of people must rebuild posts, then digest.
+        $this->useSettings($this->joinedSettings([
+            ['handle' => 'digest', 'collection' => 'digest', 'formatter' => BackReferencingFormatter::class],
+            ['handle' => 'posts', 'collection' => 'posts', 'formatter' => ReferencingFormatter::class],
+            ['handle' => 'staff', 'collection' => 'people', 'formatter' => NewsFormatter::class],
+        ]));
+
+        $this->assertSame(['posts'], $this->collections()->referencingCollections('people'));
+        $this->assertSame(['posts', 'digest'], $this->collections()->getDependants('people'));
+        $this->assertSame(['digest'], $this->collections()->getDependants('posts'));
+        $this->assertSame([], $this->collections()->getDependants('digest'));
+        $this->assertSame([], $this->http->history, 'worked out from the config alone');
+    }
+
+    public function testRecreateRefusesAReferenceCycleBeforeTouchingTheServer(): void
+    {
+        // TS-7 step 3: people joins back into posts.
+        $this->useSettings($this->joinedSettings([
+            ['handle' => 'posts', 'collection' => 'posts', 'formatter' => ReferencingFormatter::class],
+            ['handle' => 'staff', 'collection' => 'people', 'formatter' => BackReferencingFormatter::class],
+        ]));
+
+        try {
+            $this->collections()->recreate('people');
+            $this->fail('a cycle was recreated');
+        } catch (InvalidConfigException $e) {
+            $this->assertStringContainsString('cycle', $e->getMessage());
+        }
+
+        $this->assertSame([], $this->http->history);
+    }
+
     // Helpers -----------------------------------------------------------------------------------
+
+    /**
+     * @param list<array<string, mixed>> $sources
+     */
+    private function joinedSettings(array $sources): Settings
+    {
+        return new Settings([
+            'host' => 'typesense.test',
+            'port' => '8108',
+            'protocol' => 'http',
+            'apiKey' => 'admin-key',
+            'collectionPrefix' => 'test_',
+            'collections' => ['people' => [], 'posts' => [], 'digest' => []],
+            'sources' => $sources,
+        ]);
+    }
 
     /**
      * @param array<string, mixed> $collection
