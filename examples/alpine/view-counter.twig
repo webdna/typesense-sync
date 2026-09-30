@@ -1,0 +1,26 @@
+{#
+ # Typesense Sync — example view counter markup for `view-counter.js`. Unsupported.
+ #
+ # Put it on an entry's page. `views` is the counter rule's handle in `config/typesense-sync.php`
+ # (`examples/config/analytics.php`); the document id is the element id (BR-11).
+ #
+ # `analyticsConfig()` is null unless an events key and a counter rule are declared, and never
+ # throws, so the page renders either way and simply counts nothing.
+ #}
+{% set analyticsConfig = craft.typesense.analyticsConfig() %}
+
+{% if analyticsConfig %}
+    <div
+        hidden
+        x-data="typesenseViewCounter('views', '{{ entry.id }}')"
+        data-typesense-analytics="{{ analyticsConfig|json_encode|e('html_attr') }}"
+    ></div>
+{% endif %}
+
+{#
+ # Showing the counts: `viewCounts()` takes the counter rule's handle (not the collection's) and
+ # document ids, and returns counts keyed by id, or null when they cannot be read.
+ #
+ #   {% set counts = craft.typesense.viewCounts('views', [entry.id]) %}
+ #   {{ counts[entry.id] ?? 0 }} views
+ #}

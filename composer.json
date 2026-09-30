@@ -43,7 +43,8 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "webdna\\typesensesync\\tests\\": "tests/"
+            "webdna\\typesensesync\\tests\\": "tests/",
+            "modules\\search\\formatters\\": "examples/formatters/"
         }
     },
     "scripts": {

@@ -26,8 +26,8 @@ use webdna\typesensesync\jobs\DeleteElement;
 use webdna\typesensesync\jobs\SyncElement;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\services\Collections;
-use webdna\typesensesync\tests\fixtures\formatters\ActiveUserFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
+use webdna\typesensesync\tests\Support\Examples;
 use webdna\typesensesync\tests\Support\TestCollections;
 use webdna\typesensesync\TypesenseSync;
 use yii\base\Event;
@@ -139,8 +139,8 @@ class SourcesTest extends Unit
 
     public function testAStatusChangeReachesSearchWithoutASave(): void
     {
-        // Step 1: declared users with a formatter that lists the active only; a reindex (what
-        // setup runs) lists them.
+        // Step 1: declared users with the example formatter, which lists the active only; a
+        // reindex (what setup runs) lists them.
         $alice = $this->createActiveUser('alice');
         $bob = $this->createActiveUser('bob');
         $this->clearQueue();
@@ -260,7 +260,9 @@ class SourcesTest extends Unit
         ]];
 
         if ($users) {
-            $sources[] = ['kind' => 'users', 'collection' => 'people', 'formatter' => ActiveUserFormatter::class];
+            // The users source exactly as `examples/config/users.php` declares it, with the
+            // example UserFormatter, which lists active users with a name.
+            $sources[] = Examples::config('users')['sources'][0];
         }
 
         return new Settings([
@@ -269,7 +271,7 @@ class SourcesTest extends Unit
             'protocol' => (string)getenv('TYPESENSE_TEST_PROTOCOL'),
             'apiKey' => (string)getenv('TYPESENSE_TEST_API_KEY'),
             'collectionPrefix' => $this->prefix,
-            'collections' => ['topics' => [], 'people' => []],
+            'collections' => ['topics' => [], 'people' => Examples::config('users')['collections']['people']],
             'sources' => $sources,
         ]);
     }
@@ -328,7 +330,8 @@ class SourcesTest extends Unit
     private function createActiveUser(string $name): User
     {
         $username = $name . substr($this->prefix, 2, 8);
-        $user = new User(['username' => $username, 'email' => $username . '@example.test']);
+        // A name, because the example formatter never lists a user without one.
+        $user = new User(['username' => $username, 'email' => $username . '@example.test', 'fullName' => ucfirst($name) . ' Test']);
         $this->save($user);
         Craft::$app->getUsers()->activateUser($user);
         $this->assertSame(User::STATUS_ACTIVE, $user->getStatus());

@@ -154,6 +154,13 @@ docker compose run --rm php composer validate --strict --no-plugins
   `@var class-string` on Commerce's class name; with it, the loadability check reads as always
   true. `Commerce::productClass()` narrows with `is_subclass_of()`, and only the Commerce leg's
   config ignores its two "always true" identifiers.
+- **In the Commerce harness, a variant set with `setVariants()` on a new product is not saved**
+  (Commerce 5.7: the variant has no id and no errors). The product then has no default
+  variant, so price and SKU read null. A test needing variant data saves the `Variant` itself
+  (`ownerId` and `primaryOwnerId` = the product), then re-saves the product.
+- **The examples are autoloaded only in dev** (`autoload-dev`: `modules\search\formatters\` →
+  `examples/formatters/`). The tests and PHPStan load them, and a site never does. Load an example
+  config with `tests/Support/Examples.php`, never a copy in a fixture.
 - **`craftcms/phpstan` does not require PHPStan** — it only suggests it. `phpstan/phpstan` is its
   own dev requirement.
 

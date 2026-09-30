@@ -8,6 +8,7 @@ use Craft;
 use craft\db\Query;
 use craft\db\Table;
 use craft\elements\Entry;
+use craft\elements\User;
 use craft\fieldlayoutelements\entries\EntryTitleField;
 use craft\helpers\Db;
 use craft\helpers\ElementHelper;
@@ -26,6 +27,7 @@ use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\NotAFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\RefusingFormatter;
+use webdna\typesensesync\tests\Support\Examples;
 use webdna\typesensesync\tests\Support\TestCollections;
 use webdna\typesensesync\TypesenseSync;
 use yii\console\ExitCode;
@@ -79,8 +81,13 @@ class ConsoleTest extends Unit
 
     // TS-2 - declare and set up (BR-1, BR-3) ----------------------------------------------------
 
-    public function testSetupCreatesTheCollectionAndIndexesOnlyDeclaredContent(): void
+    /**
+     * Run on `examples/config/typesense-sync.php` as a developer copies it, with only its section
+     * handle renamed to this run's, and the example ContentFormatter (task 8.1).
+     */
+    public function testSetupOnTheBaseExampleIndexesOnlyDeclaredContent(): void
     {
+        $this->useSettings($this->exampleSettings(Examples::config('typesense-sync')));
         $news = $this->saveEntry('news', 'Harbour opens');
         $private = $this->saveEntry('private', 'Board minutes');
 
@@ -93,9 +100,40 @@ class ConsoleTest extends Unit
         $hits = $this->search('Harbour opens');
         $this->assertSame([(string)$news->id], array_column($hits, 'id'), 'step 2: the news entry is found');
         $this->assertStringStartsWith('/', (string)$hits[0]['url'], 'step 2: with a root-relative URL');
+        $this->assertSame('News', $hits[0]['section'] ?? null, 'step 2: built by the example formatter');
         $this->assertSame([], $this->search('Board minutes'), 'step 3: the private entry is not');
         $this->assertSame([], array_filter($this->jobs(SyncElement::class), fn(SyncElement $job) => $job->elementId === $private->id), 'step 3: and no job was queued for it');
         $this->assertSame($this->prefix . 'content_1', $this->plugin->collections->getActiveCollectionName('content'), 'the live name is an alias (BR-3)');
+    }
+
+    /**
+     * `examples/config/joins.php`: setup creates both collections in the order declared, a
+     * search of content returns its author's name through the join, the reference reads back as
+     * declared, and taking the author out of search leaves what they wrote searchable.
+     */
+    public function testSetupOnTheJoinsExampleJoinsContentToItsAuthor(): void
+    {
+        $this->useSettings($this->exampleSettings(Examples::config('joins')));
+        $author = new User(['username' => 'author' . $this->prefix, 'email' => 'author' . $this->prefix . '@example.test', 'fullName' => 'Ada Harbour']);
+        $this->assertTrue(Craft::$app->getElements()->saveElement($author), implode(' ', $author->getFirstErrors()));
+        Craft::$app->getUsers()->activateUser($author);
+        $news = $this->saveEntry('news', 'Harbour opens', $author->id);
+
+        $run = $this->command('setup');
+
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $people = $this->prefix . 'people';
+        $this->assertLessThan(strpos($run['out'], 'Created ' . $this->prefix . 'content_1'), strpos($run['out'], 'Created ' . $people . '_1'), 'people is created before content');
+        $this->assertSame('Ada Harbour', $this->joinedAuthor($people), 'the join returns the author');
+
+        foreach (['people', 'content'] as $handle) {
+            $this->assertTrue($this->plugin->collections->diff($handle)['upToDate'], "$handle reads back as declared, reference options included");
+        }
+
+        Craft::$app->getUsers()->suspendUser($author);
+        $this->plugin->sync->syncElement(Craft::$app->getUsers()->getUserById((int)$author->id));
+        $this->assertNotNull($this->document((string)$news->id), 'cascade_delete is off: the entry stays when its author leaves search');
+        $this->assertNull($this->joinedAuthor($people));
     }
 
     public function testSetupRunAgainChangesNothingAndSkipSyncIndexesNothing(): void
@@ -444,7 +482,39 @@ class ConsoleTest extends Unit
         return $section;
     }
 
-    private function saveEntry(string $section, string $title): Entry
+    /**
+     * An example config file's array with this run's connection and prefix, and its section
+     * handles renamed to this run's sections.
+     *
+     * @param array<string, mixed> $config
+     */
+    private function exampleSettings(array $config): Settings
+    {
+        $handles = array_map(fn(Section $section) => (string)$section->handle, $this->sections);
+
+        return new Settings(Examples::withHandles($config, $handles) + [
+            'host' => (string)getenv('TYPESENSE_TEST_HOST'),
+            'port' => (string)getenv('TYPESENSE_TEST_PORT'),
+            'protocol' => (string)getenv('TYPESENSE_TEST_PROTOCOL'),
+            'apiKey' => (string)getenv('TYPESENSE_TEST_API_KEY'),
+            'collectionPrefix' => $this->prefix,
+        ]);
+    }
+
+    /**
+     * The author's name as a joined search of content returns it, or null.
+     */
+    private function joinedAuthor(string $people): ?string
+    {
+        $result = $this->admin->collections[$this->prefix . 'content']->documents->search([
+            'q' => '*',
+            'include_fields' => sprintf('title,$%s(title)', $people),
+        ]);
+
+        return $result['hits'][0]['document'][$people]['title'] ?? null;
+    }
+
+    private function saveEntry(string $section, string $title, ?int $authorId = null): Entry
     {
         $entry = new Entry([
             'sectionId' => $this->sections[$section]->id,
@@ -452,6 +522,9 @@ class ConsoleTest extends Unit
             'title' => $title,
             'slug' => ElementHelper::generateSlug($title),
         ]);
+        if ($authorId !== null) {
+            $entry->setAuthorId($authorId);
+        }
         $this->assertTrue(Craft::$app->getElements()->saveElement($entry), implode(' ', $entry->getFirstErrors()));
 
         return $entry;
