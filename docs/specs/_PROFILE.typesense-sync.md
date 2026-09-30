@@ -60,6 +60,7 @@ throwaway Craft 5 install — never from LLL (see Traps).
 | Queue jobs | `src/jobs/` |
 | Formatter contract + base | `src/formatters/` |
 | Events | `src/events/` |
+| Exceptions | `src/errors/` |
 | Console controllers | `src/console/controllers/` |
 | CP controllers | `src/controllers/` |
 | Utility, element action, Twig variable | `src/utilities/`, `src/elements/actions/`, `src/variables/` |
@@ -137,6 +138,9 @@ docker compose run --rm php composer validate --strict --no-plugins
 - **A CP settings save writes only the posted keys** (`toArray(array_keys($posted))`), and a
   crafted POST can name any attribute. `Settings::fields()` leaves `collections`, `sources` and
   `analytics` out, which is what keeps them out of project config.
+- **Craft's queue runs a job once unless it implements `RetryableJobInterface`** (yii2-queue
+  `attempts` defaults to 1). A retryable job that throws stays reserved and is picked up again
+  only after its TTR expires, so the TTR is the retry backoff.
 - **A static or page cache that outlives a scoped key's TTL** serves an expired key and search
   silently fails for anonymous visitors.
 

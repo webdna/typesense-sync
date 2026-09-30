@@ -3,11 +3,16 @@
 namespace webdna\typesensesync;
 
 use Craft;
+use craft\base\Element;
+use craft\base\ElementInterface;
 use craft\base\Model;
 use craft\base\Plugin;
+use Throwable;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\services\Client;
+use webdna\typesensesync\services\Sync;
 use webdna\typesensesync\services\Targets;
+use yii\base\Event;
 
 /**
  * Typesense Sync: keeps declared Craft content in Typesense collections and hands search pages
@@ -22,6 +27,7 @@ use webdna\typesensesync\services\Targets;
  * @method Settings getSettings()
  * @property-read Client $client
  * @property-read Targets $targets
+ * @property-read Sync $sync
  */
 class TypesenseSync extends Plugin
 {
@@ -43,6 +49,7 @@ class TypesenseSync extends Plugin
             'components' => [
                 'client' => Client::class,
                 'targets' => Targets::class,
+                'sync' => Sync::class,
             ],
         ];
     }
@@ -52,6 +59,9 @@ class TypesenseSync extends Plugin
         parent::init();
 
         $this->applyFileOnlySettings();
+
+        // Once every plugin has loaded, so their EVENT_REGISTER_ELEMENT_TYPES handlers count.
+        Craft::$app->onInit(fn() => $this->registerElementEvents());
     }
 
     /**
@@ -89,6 +99,39 @@ class TypesenseSync extends Plugin
             'problems' => $settings->getProblems(),
             'warnings' => $settings->getWarnings(),
         ]);
+    }
+
+    /**
+     * Saves, deletes and restores of the followed element types queue work (BR-6). Which
+     * elements actually queue anything is `sync`'s question; this only listens.
+     *
+     * A handler never lets an exception reach the save that fired it (BR-10): queueing touches
+     * only the cache and the queue table, and a failure there is logged, not thrown at an editor.
+     */
+    private function registerElementEvents(): void
+    {
+        $queue = function(string $action, Event $event): void {
+            $element = $event->sender;
+
+            if (!$element instanceof ElementInterface) {
+                return;
+            }
+
+            try {
+                $action === 'delete' ? $this->sync->queueDelete($element) : $this->sync->queueElement($element);
+            } catch (Throwable $e) {
+                Craft::error(sprintf('Could not queue a Typesense %s for element %s: %s', $action, $element->id, $e->getMessage()), self::HANDLE);
+            }
+        };
+
+        foreach ($this->targets->getElementTypes() as $type) {
+            Event::on($type, Element::EVENT_AFTER_SAVE, fn(Event $event) => $queue('sync', $event));
+            // Craft hard-deletes a provisional draft on every CP save, which fires this too; the
+            // draft guard in Targets::isSyncable() is what keeps that from deleting the document.
+            Event::on($type, Element::EVENT_AFTER_DELETE, fn(Event $event) => $queue('delete', $event));
+            // Soft-deleted elements come back, and so must their documents.
+            Event::on($type, Element::EVENT_AFTER_RESTORE, fn(Event $event) => $queue('sync', $event));
+        }
     }
 
     /**
