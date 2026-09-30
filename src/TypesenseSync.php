@@ -10,6 +10,7 @@ use craft\base\Plugin;
 use Throwable;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\services\Client;
+use webdna\typesensesync\services\Collections;
 use webdna\typesensesync\services\Sync;
 use webdna\typesensesync\services\Targets;
 use yii\base\Event;
@@ -28,6 +29,7 @@ use yii\base\Event;
  * @property-read Client $client
  * @property-read Targets $targets
  * @property-read Sync $sync
+ * @property-read Collections $collections
  */
 class TypesenseSync extends Plugin
 {
@@ -50,6 +52,7 @@ class TypesenseSync extends Plugin
                 'client' => Client::class,
                 'targets' => Targets::class,
                 'sync' => Sync::class,
+                'collections' => Collections::class,
             ],
         ];
     }

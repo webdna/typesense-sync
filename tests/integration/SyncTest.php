@@ -22,9 +22,11 @@ use webdna\typesensesync\jobs\DeleteElement;
 use webdna\typesensesync\jobs\Reindex;
 use webdna\typesensesync\jobs\SyncElement;
 use webdna\typesensesync\models\Settings;
+use webdna\typesensesync\services\Collections;
 use webdna\typesensesync\services\Sync;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\RefusingFormatter;
+use webdna\typesensesync\tests\Support\TestCollections;
 use webdna\typesensesync\TypesenseSync;
 use yii\base\Event;
 
@@ -59,23 +61,15 @@ class SyncTest extends Unit
         $this->sections['events'] = $this->createSection('events');
         $this->useSettings($this->settings());
         $this->admin = $this->plugin->client->createClient($this->settings(), 0);
-        $this->createCollection();
+        $applied = $this->plugin->collections->apply('content');
+        $this->assertSame(Collections::ACTION_CREATE, $applied['action'], $applied['message']);
     }
 
     protected function _after(): void
     {
         Event::off(Sync::class, Sync::EVENT_BEFORE_INDEX_DOCUMENT);
 
-        try {
-            $this->admin->aliases[$this->prefix . 'content']->delete();
-        } catch (ObjectNotFound) {
-        }
-
-        try {
-            $this->admin->collections[$this->prefix . 'content_1']->delete();
-        } catch (ObjectNotFound) {
-        }
-
+        TestCollections::deleteAll($this->admin, $this->prefix);
         $this->plugin->targets->setSettings(null);
         $this->plugin->client->setClient(null);
     }
@@ -289,7 +283,11 @@ class SyncTest extends Unit
             'apiKey' => (string)getenv('TYPESENSE_TEST_API_KEY'),
             'collectionPrefix' => $this->prefix,
             'batchSize' => 1,
-            'collections' => ['content' => ['counters' => $counters]],
+            // The one field the formatter does not declare: the counter.
+            'collections' => ['content' => [
+                'schema' => [['name' => 'popularity', 'type' => 'int32', 'optional' => true]],
+                'counters' => $counters,
+            ]],
             'sources' => $sources ?? [$this->source('news'), $this->source('events')],
         ]);
     }
@@ -334,24 +332,6 @@ class SyncTest extends Unit
         $this->assertTrue(Craft::$app->getEntries()->saveSection($section), implode(' ', $section->getFirstErrors()));
 
         return $section;
-    }
-
-    private function createCollection(): void
-    {
-        $this->admin->collections->create([
-            'name' => $this->prefix . 'content_1',
-            'fields' => [
-                ['name' => 'title', 'type' => 'string', 'sort' => true],
-                ['name' => 'type', 'type' => 'string', 'facet' => true],
-                ['name' => 'url', 'type' => 'string', 'index' => false, 'optional' => true],
-                ['name' => 'priority', 'type' => 'int32'],
-                ['name' => 'postDate', 'type' => 'int64', 'sort' => true],
-                ['name' => 'expiryDate', 'type' => 'int64', 'sort' => true],
-                ['name' => 'keywords', 'type' => 'string', 'optional' => true],
-                ['name' => 'popularity', 'type' => 'int32', 'optional' => true],
-            ],
-        ]);
-        $this->admin->aliases->upsert($this->prefix . 'content', ['collection_name' => $this->prefix . 'content_1']);
     }
 
     private function saveEntry(string $section, string $title): Entry

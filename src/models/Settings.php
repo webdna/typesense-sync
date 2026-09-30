@@ -383,6 +383,17 @@ class Settings extends Model
     }
 
     /**
+     * The live name of every declared collection whose name resolves, by handle: what a
+     * formatter's SchemaContext resolves a reference against.
+     *
+     * @return array<string, string>
+     */
+    public function getLiveNames(): array
+    {
+        return self::liveNamesOf($this->getCollectionConfigs());
+    }
+
+    /**
      * Configuration errors: anything that stops the declared config working as written. The
      * utility lists them and `setup` exits non-zero on any (BR-4).
      *
@@ -626,14 +637,7 @@ class Settings extends Model
     private function schemaProblems(array $collections): array
     {
         $errors = [];
-        $liveNames = [];
-
-        foreach ($collections as $handle => $collection) {
-            if ($collection->hasName()) {
-                $liveNames[$handle] = $collection->getName();
-            }
-        }
-
+        $liveNames = self::liveNamesOf($collections);
         $handlesByName = array_flip($liveNames);
         $references = [];
 
@@ -660,7 +664,7 @@ class Settings extends Model
                         continue;
                     }
 
-                    $definition = $this->comparableField($field);
+                    $definition = self::comparableField($field);
 
                     if (isset($fields[$name]) && $fields[$name]['definition'] !== $definition) {
                         $errors[] = Craft::t('typesense-sync', 'Collection "{collection}": formatters {first} and {second} declare field "{field}" differently.', [
@@ -738,7 +742,7 @@ class Settings extends Model
      * @param array<string, mixed> $field
      * @return array<string, mixed>
      */
-    private function comparableField(array $field): array
+    public static function comparableField(array $field): array
     {
         foreach (self::FIELD_DEFAULTS as $key => $default) {
             if (array_key_exists($key, $field) && $field[$key] === $default) {
@@ -749,6 +753,23 @@ class Settings extends Model
         ksort($field);
 
         return $field;
+    }
+
+    /**
+     * @param array<string, CollectionConfig> $collections
+     * @return array<string, string>
+     */
+    private static function liveNamesOf(array $collections): array
+    {
+        $names = [];
+
+        foreach ($collections as $handle => $collection) {
+            if ($collection->hasName()) {
+                $names[$handle] = $collection->getName();
+            }
+        }
+
+        return $names;
     }
 
     /**
