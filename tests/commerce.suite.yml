@@ -1,0 +1,15 @@
+# Commerce leg (TS-10 step 2): Craft booted with Commerce installed, against the MySQL and
+# Typesense containers. Run only through tests/commerce/run.sh, which installs vendor-commerce/.
+actor: IntegrationTester
+suite_namespace: webdna\typesensesync\tests\commerce
+modules:
+  enabled:
+    - Asserts
+    - \craft\test\Craft:
+        plugins:
+          commerce:
+            class: '\craft\commerce\Plugin'
+            handle: commerce
+          typesense-sync:
+            class: '\webdna\typesensesync\TypesenseSync'
+            handle: typesense-sync

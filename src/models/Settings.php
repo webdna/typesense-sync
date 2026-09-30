@@ -9,6 +9,7 @@ use craft\helpers\App;
 use Throwable;
 use webdna\typesensesync\formatters\FormatterInterface;
 use webdna\typesensesync\formatters\SchemaContext;
+use webdna\typesensesync\helpers\Commerce;
 use webdna\typesensesync\TypesenseSync;
 
 /**
@@ -508,7 +509,7 @@ class Settings extends Model
      */
     protected function isCommerceInstalled(): bool
     {
-        return Craft::$app->getPlugins()->isPluginEnabled('commerce');
+        return Commerce::isInstalled();
     }
 
     /**

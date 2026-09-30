@@ -19,6 +19,7 @@ use craft\models\Section_SiteSettings;
 use Typesense\Client as TypesenseClient;
 use Typesense\Exceptions\ObjectNotFound;
 use webdna\typesensesync\console\Controller;
+use webdna\typesensesync\helpers\Commerce;
 use webdna\typesensesync\jobs\Reindex;
 use webdna\typesensesync\jobs\SyncElement;
 use webdna\typesensesync\models\Settings;
@@ -142,6 +143,26 @@ class ConsoleTest extends Unit
         $this->assertStringContainsString('Could not connect', $run['err']);
         $this->useSettings($this->settings());
         $this->assertNull($this->plugin->collections->getActiveCollectionName('content'));
+    }
+
+    // TS-10 step 1 - Commerce absent (BR-5) -----------------------------------------------------
+
+    public function testAProductsSourceWithoutCommerceWarnsAndSetupStillSucceeds(): void
+    {
+        $this->assertFalse(Commerce::isInstalled(), 'this leg runs without Commerce');
+        $news = $this->saveEntry('news', 'Harbour opens');
+        $this->useSettings($this->settings(sources: [
+            $this->source('news'),
+            ['kind' => 'productType', 'handle' => 'shoes', 'collection' => 'content', 'formatter' => DocumentFormatter::class],
+        ]));
+
+        $run = $this->command('setup');
+
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertStringContainsString('productType:shoes is ignored because Commerce is not installed.', $run['out'], 'a warning');
+        $this->assertSame('', $run['err'], 'not an error');
+        $this->assertSame([(string)$news->id], array_column($this->search('Harbour opens'), 'id'), 'the rest of the config still indexes');
+        $this->assertNotContains(Commerce::PRODUCT_CLASS, $this->plugin->targets->getElementTypes(), 'products are not followed');
     }
 
     // TS-6 - reindex and prune (BR-12, BR-13, BR-14) --------------------------------------------

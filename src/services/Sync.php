@@ -19,6 +19,7 @@ use webdna\typesensesync\events\IndexDocumentEvent;
 use webdna\typesensesync\events\SyncEvent;
 use webdna\typesensesync\formatters\BaseFormatter;
 use webdna\typesensesync\formatters\FormatterInterface;
+use webdna\typesensesync\helpers\Commerce;
 use webdna\typesensesync\jobs\DeleteElement;
 use webdna\typesensesync\jobs\SyncElement;
 use webdna\typesensesync\models\ResolvedTarget;
@@ -594,6 +595,7 @@ class Sync extends Component
             SourceConfig::KIND_CATEGORY_GROUP => Category::find()->group($source->handle),
             // Every user: the formatter decides who is listed, as it does for a single sync.
             SourceConfig::KIND_USERS => User::find(),
+            SourceConfig::KIND_PRODUCT_TYPE => Commerce::productQuery($source->handle),
             default => null,
         };
 

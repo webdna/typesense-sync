@@ -13,6 +13,7 @@ use craft\helpers\StringHelper;
 use craft\helpers\UrlHelper;
 use DateTimeInterface;
 use Throwable;
+use webdna\typesensesync\helpers\Commerce;
 use webdna\typesensesync\models\ResolvedTarget;
 use webdna\typesensesync\TypesenseSync;
 
@@ -165,23 +166,28 @@ abstract class BaseFormatter implements FormatterInterface
     }
 
     /**
-     * A label for the kind of thing the document is, for grouping results: an entry's type name,
-     * else the element type's display name.
+     * A label for the kind of thing the document is, for grouping results: an entry's or a
+     * product's type name, else the element type's display name.
      */
     protected function documentType(ElementInterface $element): string
     {
-        return $element instanceof Entry ? (string)$element->getType()->name : $element::displayName();
+        if ($element instanceof Entry) {
+            return (string)$element->getType()->name;
+        }
+
+        return Commerce::productTypeOf($element)['name'] ?? $element::displayName();
     }
 
     /**
-     * When the element becomes visible, as Unix seconds. An entry with no post date is pending,
-     * so it is never published; an element with no idea of publishing is always published.
+     * When the element becomes visible, as Unix seconds. An entry or product with no post date
+     * is pending, so it is never published; an element with no idea of publishing is always
+     * published.
      */
     protected function publishedAt(ElementInterface $element): int
     {
         $date = $this->timestamp($element->postDate ?? null);
 
-        return $date ?? ($element instanceof Entry ? self::FAR_FUTURE : 0);
+        return $date ?? ($element instanceof Entry || Commerce::isProduct($element) ? self::FAR_FUTURE : 0);
     }
 
     /**
