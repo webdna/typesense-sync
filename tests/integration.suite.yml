@@ -1,0 +1,7 @@
+# Integration tier: Craft booted against the MySQL container, and a real Typesense 30.x container.
+actor: IntegrationTester
+suite_namespace: webdna\typesensesync\tests\integration
+modules:
+  enabled:
+    - Asserts
+    - \craft\test\Craft

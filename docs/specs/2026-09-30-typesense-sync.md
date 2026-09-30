@@ -498,7 +498,7 @@ Phases 4–7 are independent once 3 is done; build them in number order unless o
 
 ### Tasks
 
-- [ ] **1.1 Scaffold** — `composer.json`, `src/TypesenseSync.php`, `docker-compose.yml`, `codeception.yml`, `tests/_craft/`, `phpstan.neon`, `ecs.php`, `.github/workflows/ci.yml`, `LICENSE.md`
+- [x] **1.1 Scaffold** — `composer.json`, `src/TypesenseSync.php`, `docker-compose.yml`, `codeception.yml`, `tests/_craft/`, `phpstan.neon`, `ecs.php`, `.github/workflows/ci.yml`, `LICENSE.md`
       Rules: BR-26 · Verify: B5 #1, #3
 - [ ] **1.2 Settings model, CP settings screen, config parsing and validation** — `src/models/{Settings,CollectionConfig,SourceConfig,ResolvedTarget}.php`, `src/templates/settings.twig`
       Rules: BR-2, BR-3, BR-4, BR-5 · Verify: unit suite, TN-3, TN-4, TN-14
@@ -613,8 +613,8 @@ grep -rniE 'members|marketplace|lll|legacy|goodStanding|companies|Features::' sr
 # expect: no output
 
 # 3. Store-valid metadata (BR-26)
-docker compose run --rm php composer validate --strict
-# expect: "./composer.json is valid"
+docker compose run --rm php composer validate --strict --no-plugins
+# expect: "./composer.json is valid"  (--no-plugins: craftcms/plugin-installer crashes `validate` on a relative vendor path)
 
 # 4. Second PHP leg
 PHP_VERSION=8.4 docker compose run --rm php composer check

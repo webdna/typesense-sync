@@ -1,0 +1,7 @@
+# Unit tier: Craft booted, Typesense never reached (the client is mocked).
+actor: UnitTester
+suite_namespace: webdna\typesensesync\tests\unit
+modules:
+  enabled:
+    - Asserts
+    - \craft\test\Craft

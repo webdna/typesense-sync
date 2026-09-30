@@ -1,0 +1,31 @@
+namespace: webdna\typesensesync\tests
+support_namespace: Support
+actor_suffix: Tester
+paths:
+  tests: tests
+  output: tests/_output
+  data: tests/_data
+  support: tests/Support
+  envs: tests/_envs
+bootstrap: _bootstrap.php
+settings:
+  shuffle: false
+  colors: true
+# Connection details come from the environment (docker-compose.yml), never a checked-in file.
+params:
+  - env
+modules:
+  config:
+    \craft\test\Craft:
+      configFile: 'tests/_craft/config/test.php'
+      entryUrl: 'https://test.craftcms.test/index.php'
+      projectConfig: {}
+      migrations: []
+      plugins:
+        typesense-sync:
+          class: '\webdna\typesensesync\TypesenseSync'
+          handle: typesense-sync
+      cleanup: true
+      transaction: true
+      dbSetup: {clean: true, setupCraft: true}
+      fullMock: false

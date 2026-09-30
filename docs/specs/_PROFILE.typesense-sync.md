@@ -4,8 +4,7 @@
 project-specific half of a spec's build contract, so individual specs can stay about their feature.
 
 > **Agents: read this whole file before writing code.** The repo is new (30 Sep 2026). Stack,
-> commands and layout below are what the first spec's task 1.1 creates — until that task is ticked,
-> they describe the target, not what is on disk. The Traps section is not invented: every entry is
+> commands and layout below were created by the first spec's task 1.1 and are on disk. The Traps section is not invented: every entry is
 > something that broke, or was guarded against, in one of the five hand-built Typesense modules
 > this plugin replaces (chiefly `~/Projects/lll/modules/typesense`).
 
@@ -42,6 +41,12 @@ docker compose run --rm php composer cs            # ecs check (cs-fix to apply)
 PHP_VERSION=8.4 docker compose run --rm php composer check   # the second CI leg
 ```
 
+`validate` needs `--no-plugins`: with plugins loaded, `craftcms/plugin-installer` throws
+"$from (./vendor/craftcms) and $to (/app) must be absolute paths". On PHP 8.4, `composer cs` prints
+~150 `Deprecated:` lines from ECS 10's vendored React packages (`craftcms/ecs` pins ECS 10); they are
+noise — PHP_CodeSniffer resets `error_reporting(E_ALL)` itself, so no `-d` flag silences them. Judge
+the run by its exit code and "No errors found".
+
 Manual testing against a real site uses a composer **path repository** pointing at this repo from a
 throwaway Craft 5 install — never from LLL (see Traps).
 
@@ -76,7 +81,7 @@ grep -rniE 'members|marketplace|lll|legacy|goodStanding|companies|Features::' sr
 # expect: no output
 
 # 3. Composer metadata is Store-valid
-docker compose run --rm php composer validate --strict
+docker compose run --rm php composer validate --strict --no-plugins
 # expect: "./composer.json is valid"
 ```
 
@@ -101,6 +106,16 @@ docker compose run --rm php composer validate --strict
   are read from the live collection first and written back.
 - **A prune that runs after a query returned nothing deletes the whole collection.** Skip the prune
   when the run built zero documents.
+
+### Tooling
+
+- **Craft 5's `TestSetup::configureCraft()` needs `CRAFT_ROOT_PATH` and `CRAFT_TESTS_PATH` defined,
+  and every `CRAFT_*_PATH` directory to exist** (it `realpath()`s them). Older webdna harnesses
+  (spam-blocker) omit both and fail with "Undefined constant".
+- **Codeception 5 reads `bootstrap:` at the top level of `codeception.yml`.** Under `settings:` it is
+  silently ignored and Craft's constants are never defined.
+- **`craftcms/phpstan` does not require PHPStan** — it only suggests it. `phpstan/phpstan` is its
+  own dev requirement.
 
 ### Craft
 

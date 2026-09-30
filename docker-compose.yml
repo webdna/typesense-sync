@@ -1,0 +1,60 @@
+# Test containers. Nothing here is a real site or a real cluster: the integration suite writes
+# only to this Typesense, under the `test_` collection prefix.
+#
+#   docker compose up -d mysql typesense
+#   docker compose run --rm php composer check
+#   PHP_VERSION=8.4 docker compose run --rm php composer check
+
+services:
+  php:
+    build:
+      context: docker/php
+      args:
+        PHP_VERSION: ${PHP_VERSION:-8.2}
+    image: typesense-sync-php:${PHP_VERSION:-8.2}
+    working_dir: /app
+    volumes:
+      - .:/app
+      - composer-cache:/root/.composer/cache
+    environment:
+      DB_DRIVER: mysql
+      DB_SERVER: mysql
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_DATABASE: craft_test
+      DB_SCHEMA: ""
+      DB_TABLE_PREFIX: craft_
+      CRAFT_SECURITY_KEY: typesense-sync-test-security-key
+      TYPESENSE_TEST_HOST: typesense
+      TYPESENSE_TEST_PORT: "8108"
+      TYPESENSE_TEST_PROTOCOL: http
+      TYPESENSE_TEST_API_KEY: typesense-sync-test-admin-key
+    depends_on:
+      mysql:
+        condition: service_healthy
+      typesense:
+        condition: service_started
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: craft_test
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-proot"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  typesense:
+    # The minimum supported server (BR-24): the suite proves 30.0 works, not merely the latest.
+    image: typesense/typesense:30.0
+    command: ["--data-dir", "/data", "--api-key", "typesense-sync-test-admin-key", "--enable-cors"]
+    tmpfs:
+      - /data
+
+volumes:
+  composer-cache:

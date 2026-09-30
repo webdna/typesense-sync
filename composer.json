@@ -1,0 +1,84 @@
+{
+    "name": "webdna/typesense-sync",
+    "description": "Keep Craft content in a Typesense search index, and give search pages a safe, filtered search key, by declaring what to index.",
+    "type": "craft-plugin",
+    "keywords": [
+        "craft",
+        "cms",
+        "craftcms",
+        "craft-plugin",
+        "typesense",
+        "search"
+    ],
+    "license": "proprietary",
+    "authors": [
+        {
+            "name": "webdna",
+            "homepage": "https://webdna.co.uk"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/webdna/typesense-sync/issues",
+        "source": "https://github.com/webdna/typesense-sync",
+        "docs": "https://github.com/webdna/typesense-sync/blob/main/README.md"
+    },
+    "require": {
+        "php": "^8.2",
+        "craftcms/cms": "^5.6",
+        "typesense/typesense-php": "^6.0"
+    },
+    "require-dev": {
+        "codeception/codeception": "^5.2",
+        "codeception/module-asserts": "^3.0",
+        "codeception/module-yii2": "^1.1",
+        "craftcms/ecs": "dev-main",
+        "craftcms/phpstan": "dev-main",
+        "phpstan/phpstan": "^2.1",
+        "vlucas/phpdotenv": "^5.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "webdna\\typesensesync\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "webdna\\typesensesync\\tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "check": [
+            "@cs",
+            "@analyse",
+            "@test:unit",
+            "@test:integration"
+        ],
+        "cs": "ecs check --ansi",
+        "cs-fix": "ecs check --ansi --fix",
+        "analyse": "phpstan analyse --memory-limit=1G --no-progress",
+        "test:unit": "codecept run unit",
+        "test:integration": "codecept run integration"
+    },
+    "extra": {
+        "name": "Typesense Sync",
+        "handle": "typesense-sync",
+        "class": "webdna\\typesensesync\\TypesenseSync",
+        "developer": "webdna",
+        "developerUrl": "https://webdna.co.uk",
+        "documentationUrl": "https://github.com/webdna/typesense-sync/blob/main/README.md",
+        "changelogUrl": "https://raw.githubusercontent.com/webdna/typesense-sync/main/CHANGELOG.md"
+    },
+    "config": {
+        "sort-packages": true,
+        "platform": {
+            "php": "8.2"
+        },
+        "allow-plugins": {
+            "craftcms/plugin-installer": true,
+            "php-http/discovery": false,
+            "yiisoft/yii2-composer": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
