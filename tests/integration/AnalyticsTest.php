@@ -15,12 +15,14 @@ use craft\models\FieldLayout;
 use craft\models\FieldLayoutTab;
 use craft\models\Section;
 use craft\models\Section_SiteSettings;
+use craft\web\View;
 use Typesense\Client as TypesenseClient;
 use webdna\typesensesync\console\Controller;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
 use webdna\typesensesync\tests\Support\TestCollections;
 use webdna\typesensesync\TypesenseSync;
+use webdna\typesensesync\utilities\Utility;
 use yii\console\ExitCode;
 
 /**
@@ -247,6 +249,34 @@ class AnalyticsTest extends Unit
         $this->assertSame(ExitCode::CONFIG, $run['exit']);
         $this->assertStringContainsString('unknown type "popular"', $run['err']);
         $this->assertSame([], $this->ruleNames());
+    }
+
+    // The utility's analytics pane (§6 Screens) ---------------------------------------------------
+
+    public function testTheUtilityShowsEachRulesStateAndPointsAtTheApplyCommand(): void
+    {
+        $this->assertSame(ExitCode::OK, $this->command('collections/apply')['exit']);
+        Craft::$app->getView()->setTemplateMode(View::TEMPLATE_MODE_CP);
+
+        $html = Utility::contentHtml();
+        $this->assertStringContainsString('data-ts-section="analytics"', $html);
+        $this->assertStringContainsString('data-analytics-rule="views"', $html);
+        $this->assertSame(3, substr_count($html, 'data-ts-analytics="missing"'), 'nothing applied yet');
+        $this->assertStringContainsString('typesense-sync/analytics/apply', $html);
+
+        $this->assertSame(ExitCode::OK, $this->command('analytics/apply')['exit']);
+        $html = Utility::contentHtml();
+        $this->assertSame(3, substr_count($html, 'data-ts-analytics="ok"'));
+        $this->assertStringNotContainsString('typesense-sync/analytics/apply', $html, 'nothing left to apply');
+
+        // A changed limit reads as differing from the config.
+        $this->useSettings($this->settings(limit: 50));
+        $rules = array_column(Utility::variables()['analytics']['rules'], 'state', 'handle');
+        $this->assertSame(['popular' => 'differs', 'noHits' => 'ok', 'views' => 'ok'], $rules);
+
+        $this->useSettings($this->settings(analytics: false));
+        $this->assertNull(Utility::variables()['analytics']);
+        $this->assertStringNotContainsString('data-ts-section="analytics"', Utility::contentHtml());
     }
 
     // Helpers ------------------------------------------------------------------------------------

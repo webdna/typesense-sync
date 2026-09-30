@@ -6,7 +6,8 @@
   handle does not match (BR-22, BR-23). No key is rendered here (BR-17).
 
   Test hooks (spec §7): data-collection="<handle>" on each collection row, data-ts-action="<action>"
-  on each button.
+  on each button; data-ts-section="analytics" on the analytics pane, data-analytics-rule="<handle>"
+  on each rule row, data-ts-analytics="missing|differs|ok" on its state.
 #}
 {% import '_includes/forms.twig' as forms %}
 
@@ -182,5 +183,64 @@
       {% endif %}
     </div>
   {% endfor %}
+
+  {% if analytics %}
+    {% set typeLabels = {
+      popular_queries: 'Popular searches'|t('typesense-sync'),
+      nohits_queries: 'Searches with no results'|t('typesense-sync'),
+      counter: 'Counter'|t('typesense-sync'),
+    } %}
+    <div class="pane" data-ts-section="analytics">
+      <h2>{{ 'Analytics'|t('typesense-sync') }}</h2>
+
+      {% if analytics.error %}
+        <p class="error">{{ analytics.error }}</p>
+      {% endif %}
+
+      {% if analytics.rules %}
+        <table class="data fullwidth">
+          <thead>
+            <tr>
+              <th scope="col">{{ 'Rule'|t('typesense-sync') }}</th>
+              <th scope="col">{{ 'Type'|t('typesense-sync') }}</th>
+              <th scope="col">{{ 'Collection'|t('typesense-sync') }}</th>
+              <th scope="col">{{ 'State'|t('typesense-sync') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for rule in analytics.rules %}
+              <tr data-analytics-rule="{{ rule.handle }}">
+                <td>{{ rule.handle }} <code class="light">{{ rule.name }}</code></td>
+                <td>{{ typeLabels[rule.type] ?? rule.type }}</td>
+                <td>{{ rule.collection }}</td>
+                <td data-ts-analytics="{{ rule.state }}">
+                  {% if rule.state == 'ok' %}
+                    <span class="success">{{ 'Up to date'|t('typesense-sync') }}</span>
+                  {% elseif rule.state == 'differs' %}
+                    <span class="warning">{{ 'Differs from the config'|t('typesense-sync') }}</span>
+                  {% else %}
+                    <span class="warning">{{ 'Not on the server'|t('typesense-sync') }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        {% if analytics.rules|filter(r => r.state != 'ok') %}
+          <p class="light">
+            {{ 'Apply the rules from the command line:'|t('typesense-sync') }}
+            <code>php craft typesense-sync/analytics/apply</code>
+          </p>
+        {% endif %}
+      {% endif %}
+
+      {% if analytics.unmanaged %}
+        <p class="light">
+          {{ 'Also on the server, not declared here (left alone): {names}'|t('typesense-sync', {names: analytics.unmanaged|join(', ')}) }}
+        </p>
+      {% endif %}
+    </div>
+  {% endif %}
 
 {% endif %}

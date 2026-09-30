@@ -2,6 +2,7 @@
 
 namespace webdna\typesensesync\models;
 
+use Craft;
 use craft\base\Model;
 use craft\helpers\App;
 use yii\base\InvalidConfigException;
@@ -98,11 +99,10 @@ class CollectionConfig extends Model
         $name = $this->resolvedName();
 
         if ($name === '') {
-            throw new InvalidConfigException(sprintf(
-                'Typesense collection "%s" is named "%s", which resolves to nothing.',
-                $this->handle,
-                $this->name,
-            ));
+            throw new InvalidConfigException(Craft::t('typesense-sync', 'Typesense collection "{collection}" is named "{name}", which resolves to nothing.', [
+                'collection' => $this->handle,
+                'name' => (string)$this->name,
+            ]));
         }
 
         return $name;

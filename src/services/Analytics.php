@@ -155,7 +155,7 @@ class Analytics extends Component
                     try {
                         $client->collections->create(['name' => $destination, 'fields' => self::DESTINATION_FIELDS]);
                     } catch (Throwable $e) {
-                        throw $this->failure(sprintf('Could not create the analytics collection "%s"', $destination), $e);
+                        throw $this->failure(Craft::t('typesense-sync', 'Could not create the analytics collection "{name}"', ['name' => $destination]), $e);
                     }
                 }
 
@@ -174,7 +174,7 @@ class Analytics extends Component
                 try {
                     $client->analytics->rules()[$name]->update($payload);
                 } catch (Throwable $e) {
-                    throw $this->failure(sprintf('Could not write analytics rule "%s"', $name), $e);
+                    throw $this->failure(Craft::t('typesense-sync', 'Could not write analytics rule "{name}"', ['name' => $name]), $e);
                 }
 
                 $messages[] = Craft::t('typesense-sync', $action === self::ACTION_CREATE ? 'Created {name}.' : 'Replaced {name}.', ['name' => $name]);
@@ -214,7 +214,7 @@ class Analytics extends Component
                 } catch (ObjectNotFound) {
                     // Gone between the read and the delete: the outcome wanted.
                 } catch (Throwable $e) {
-                    throw $this->failure(sprintf('Could not delete analytics rule "%s"', $name), $e);
+                    throw $this->failure(Craft::t('typesense-sync', 'Could not delete analytics rule "{name}"', ['name' => $name]), $e);
                 }
             }
 
@@ -241,7 +241,7 @@ class Analytics extends Component
         [$rule, $payload] = $this->payloads()[$handle] ?? [null, null];
 
         if ($rule === null || $payload === null || $rule->isCounter()) {
-            throw new SyncException(sprintf('No query rule "%s" is declared.', $handle));
+            throw new SyncException(Craft::t('typesense-sync', 'No query rule "{rule}" is declared.', ['rule' => $handle]));
         }
 
         $destination = $payload['params']['destination_collection'];
@@ -258,7 +258,7 @@ class Analytics extends Component
         } catch (ObjectNotFound) {
             return [];
         } catch (Throwable $e) {
-            throw $this->failure(sprintf('Could not read the analytics collection "%s"', $destination), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not read the analytics collection "{name}"', ['name' => $destination]), $e);
         }
 
         $rows = [];
@@ -285,7 +285,7 @@ class Analytics extends Component
         [$rule, $payload] = $this->payloads()[$handle] ?? [null, null];
 
         if ($rule === null || $payload === null || !$rule->isCounter()) {
-            throw new SyncException(sprintf('No counter rule "%s" is declared.', $handle));
+            throw new SyncException(Craft::t('typesense-sync', 'No counter rule "{rule}" is declared.', ['rule' => $handle]));
         }
 
         $field = $rule->counterField;
@@ -298,7 +298,7 @@ class Analytics extends Component
                 'per_page' => min(250, max(1, $limit)),
             ]);
         } catch (Throwable $e) {
-            throw $this->failure(sprintf('Could not read the counter "%s" of "%s"', $field, $payload['collection']), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not read the counter "{field}" of "{name}"', ['field' => $field, 'name' => $payload['collection']]), $e);
         }
 
         $rows = [];
@@ -524,7 +524,7 @@ class Analytics extends Component
         } catch (ObjectNotFound) {
             return false;
         } catch (Throwable $e) {
-            throw $this->failure(sprintf('Could not read collection "%s"', $name), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not read collection "{name}"', ['name' => $name]), $e);
         }
 
         return true;
@@ -544,7 +544,7 @@ class Analytics extends Component
     private function client(): TypesenseClient
     {
         return TypesenseSync::getInstance()->client->getClient()
-            ?? throw new SyncException('Typesense is not configured: set a host and an admin API key.');
+            ?? throw new SyncException(Craft::t('typesense-sync', 'Typesense is not configured: set a host and an admin API key.'));
     }
 
     private function settings(): Settings
