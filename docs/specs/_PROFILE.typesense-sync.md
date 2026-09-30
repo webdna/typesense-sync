@@ -105,6 +105,12 @@ docker compose run --rm php composer validate --strict --no-plugins
   printed into page HTML.
 - **A reindex rewrites whole documents.** Counter fields (view counts) are reset to zero unless they
   are read from the live collection first and written back.
+- **A retrieved collection reports every field option filled in, and "no sorting field" as `""`**
+  (30.0: `facet`, `index`, `infix`, `locale`, `optional`, `sort`, `stem`, `store`, …;
+  `default_sorting_field: ""`). Compare a declaration only after `Collections::normalise()`, and
+  never compare the sorting field with null, or every collection reads as changed.
+- **Only "not found" means absent.** A failed read of an alias treated as a missing alias makes
+  apply create an empty version and point search at it.
 - **A prune that runs after a query returned nothing deletes the whole collection.** Skip the prune
   when the run built zero documents.
 
