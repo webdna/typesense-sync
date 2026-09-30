@@ -5,7 +5,9 @@ namespace webdna\typesensesync\console;
 use Craft;
 use craft\console\Controller as CraftController;
 use craft\helpers\Console;
+use webdna\typesensesync\errors\SyncException;
 use webdna\typesensesync\models\Settings;
+use webdna\typesensesync\services\Analytics;
 use webdna\typesensesync\TypesenseSync;
 use yii\console\ExitCode;
 
@@ -160,6 +162,34 @@ abstract class Controller extends CraftController
         }
 
         return $run['rejected'] === 0 && $run['failed'] === 0;
+    }
+
+    /**
+     * Apply the declared analytics rules, printing one line per rule. False when any rule is
+     * blocked or the server fails, which is a failed run.
+     */
+    protected function applyRules(bool $dryRun = false): bool
+    {
+        try {
+            $results = self::plugin()->analytics->apply($dryRun);
+        } catch (SyncException $e) {
+            $this->stderr('  ' . $e->getMessage() . "\n", Console::FG_RED);
+
+            return false;
+        }
+
+        $ok = true;
+
+        foreach ($results as $result) {
+            if ($result['action'] === Analytics::ACTION_BLOCKED) {
+                $this->stderr("  {$result['handle']}: {$result['message']}\n", Console::FG_RED);
+                $ok = false;
+            } else {
+                $this->stdout("  {$result['handle']}: {$result['message']}\n", $result['action'] === Analytics::ACTION_NONE ? Console::FG_GREY : Console::FG_GREEN);
+            }
+        }
+
+        return $ok;
     }
 
     /**

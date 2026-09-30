@@ -73,8 +73,8 @@ class Collections extends Component
     private const SORTABLE_BY_DEFAULT = ['int32', 'int64', 'float', 'bool', 'geopoint'];
 
     /**
-     * The union of every routed formatter's schema, plus the collection's config extras, sorted
-     * by field name.
+     * The union of every routed formatter's schema, plus the collection's config extras, plus the
+     * field of each analytics counter rule on it that neither declares, sorted by field name.
      *
      * @return array<int, array<string, mixed>>
      * @throws InvalidConfigException for an undeclared collection, or two formatters declaring
@@ -119,6 +119,14 @@ class Collections extends Component
             foreach ($config->schema as $field) {
                 if (is_string($field['name'] ?? null) && $field['name'] !== '') {
                     $fields[$field['name']] = $field;
+                }
+            }
+
+            // A counter rule increments a field that must exist; a formatter or the extras may
+            // declare it themselves, otherwise it is an optional, sortable int32.
+            foreach ($settings->getAnalyticsRules() as $rule) {
+                if ($rule->isCounter() && $rule->collection === $collection) {
+                    $fields[$rule->counterField] ??= ['name' => $rule->counterField, 'type' => 'int32', 'optional' => true];
                 }
             }
         }

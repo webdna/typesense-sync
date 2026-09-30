@@ -50,6 +50,31 @@ class TypesenseVariable
     }
 
     /**
+     * What a page needs to post analytics events: `{host, port, protocol, apiKey, rules}`, the key
+     * able to create events and nothing else, and `rules` each counter rule by handle as
+     * `{name, collection, eventType}`.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function analyticsConfig(): ?array
+    {
+        return $this->guard(fn(TypesenseSync $plugin) => $plugin->analytics->clientConfig());
+    }
+
+    /**
+     * One counter rule's counts for a set of document ids, by id. A document not in the index is
+     * absent; null means the counts could not be read, which should show as unknown, never as 0.
+     *
+     * @param string $handle The counter rule's handle under `analytics.rules`.
+     * @param array<int|string> $ids
+     * @return array<string, int>|null
+     */
+    public function viewCounts(string $handle, array $ids): ?array
+    {
+        return $this->guard(fn(TypesenseSync $plugin) => $plugin->analytics->viewCounts($handle, $ids));
+    }
+
+    /**
      * @template T
      * @param callable(TypesenseSync): T $call
      * @return T|null
