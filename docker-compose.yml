@@ -52,7 +52,12 @@ services:
   typesense:
     # The minimum supported server (BR-24): the suite proves 30.0 works, not merely the latest.
     image: typesense/typesense:30.0
-    command: ["--data-dir", "/data", "--api-key", "typesense-sync-test-admin-key", "--enable-cors"]
+    # Analytics needs its own directory and flag (TS-8). The tests force a flush rather than wait
+    # for one. Events are rate-limited per client IP (default 5 a minute), and every test posts
+    # from this one container, so the limit is raised.
+    command: ["--data-dir", "/data", "--api-key", "typesense-sync-test-admin-key", "--enable-cors",
+      "--enable-search-analytics=true", "--analytics-dir=/data/analytics", "--analytics-flush-interval=1",
+      "--analytics-minute-rate-limit=10000"]
     tmpfs:
       - /data
 

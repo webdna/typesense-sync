@@ -15,6 +15,7 @@ use craft\web\twig\variables\CraftVariable;
 use Throwable;
 use webdna\typesensesync\elements\actions\Sync as SyncAction;
 use webdna\typesensesync\models\Settings;
+use webdna\typesensesync\services\Analytics;
 use webdna\typesensesync\services\Client;
 use webdna\typesensesync\services\Collections;
 use webdna\typesensesync\services\Search;
@@ -40,6 +41,7 @@ use yii\base\Event;
  * @property-read Sync $sync
  * @property-read Collections $collections
  * @property-read Search $search
+ * @property-read Analytics $analytics
  */
 class TypesenseSync extends Plugin
 {
@@ -64,6 +66,7 @@ class TypesenseSync extends Plugin
                 'sync' => Sync::class,
                 'collections' => Collections::class,
                 'search' => Search::class,
+                'analytics' => Analytics::class,
             ],
         ];
     }

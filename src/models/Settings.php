@@ -29,6 +29,11 @@ class Settings extends Model
     public const FILE_ONLY = ['collections', 'sources', 'analytics'];
 
     /**
+     * Keys the `analytics` array may carry.
+     */
+    public const ANALYTICS_KEYS = ['enabled', 'eventsKey', 'ignoreQueries', 'rules'];
+
+    /**
      * Connection settings that accept `$ENV_VAR` references and are stored unresolved.
      */
     private const ENV_ATTRIBUTES = ['host', 'port', 'protocol', 'apiKey', 'searchApiKey', 'collectionPrefix'];
@@ -113,7 +118,8 @@ class Settings extends Model
     public array $sources = [];
 
     /**
-     * Analytics declarations, validated where they are applied. File only.
+     * Analytics declarations — `enabled`, `eventsKey`, `ignoreQueries`, `rules` — read through
+     * getAnalyticsRules(). File only.
      *
      * @var array<string, mixed>
      */
@@ -298,6 +304,85 @@ class Settings extends Model
     }
 
     /**
+     * Whether analytics is on: declared, not switched off by `analytics.enabled`, and with at
+     * least one enabled rule (BR-21).
+     */
+    public function isAnalyticsEnabled(): bool
+    {
+        return $this->getAnalyticsRules() !== [];
+    }
+
+    /**
+     * The enabled analytics rules whose collection is declared, by handle. Empty when analytics
+     * is switched off, so callers need only one check.
+     *
+     * @return array<string, AnalyticsRule>
+     */
+    public function getAnalyticsRules(): array
+    {
+        if (!(bool)($this->analytics['enabled'] ?? true) || !is_array($this->analytics['rules'] ?? null)) {
+            return [];
+        }
+
+        $collections = $this->getCollectionConfigs();
+        $rules = [];
+
+        foreach ($this->analytics['rules'] as $handle => $config) {
+            if (!is_string($handle) || !is_array($config)) {
+                continue;
+            }
+
+            $rule = AnalyticsRule::fromConfig($handle, $config);
+
+            if ($rule->enabled && in_array($rule->type, AnalyticsRule::TYPES, true) && isset($collections[$rule->collection])) {
+                $rules[$handle] = $rule;
+            }
+        }
+
+        return $rules;
+    }
+
+    /**
+     * The resolved events-only key the browser posts counter events with. Empty when unset.
+     */
+    public function getAnalyticsEventsKey(): string
+    {
+        $key = $this->analytics['eventsKey'] ?? '';
+
+        return is_scalar($key) ? trim($this->env((string)$key)) : '';
+    }
+
+    /**
+     * Queries left out of every report. By default the empty query and `*`, which a search page
+     * sends before anyone types.
+     *
+     * @return string[]
+     */
+    public function getIgnoredQueries(): array
+    {
+        return array_map('strval', (array)($this->analytics['ignoreQueries'] ?? ['*', '']));
+    }
+
+    /**
+     * Fields in a collection that Typesense maintains itself, and a write must carry through
+     * (BR-14): the collection's `counters`, plus the field of every enabled counter rule on it.
+     *
+     * @return string[]
+     */
+    public function getCounterFields(string $collection): array
+    {
+        $fields = $this->getCollectionConfig($collection)->counters ?? [];
+
+        foreach ($this->getAnalyticsRules() as $rule) {
+            if ($rule->isCounter() && $rule->collection === $collection) {
+                $fields[] = $rule->counterField;
+            }
+        }
+
+        return array_values(array_unique($fields));
+    }
+
+    /**
      * Declared sources that can index on this install: well-formed, of a known kind, and — for
      * product types — only while Commerce is installed (BR-5).
      *
@@ -455,6 +540,7 @@ class Settings extends Model
 
         $collections = $this->getCollectionConfigs();
         array_push($errors, ...$this->collectionProblems($collections));
+        array_push($errors, ...$this->analyticsProblems($collections));
 
         // Sources are validated as declared, not as getSourceConfigs() filters them, so every
         // malformed or duplicate declaration is named.
@@ -584,6 +670,119 @@ class Settings extends Model
                     'name' => $name,
                 ]);
             }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * Analytics problems: unknown keys, rules of an unknown type or naming an undeclared
+     * collection, and a destination that is empty, shared, or one of the declared collections —
+     * which the rule would fill with `{q, count}` documents.
+     *
+     * @param array<string, CollectionConfig> $collections
+     * @return string[]
+     */
+    private function analyticsProblems(array $collections): array
+    {
+        $errors = [];
+
+        foreach (array_diff(array_keys($this->analytics), self::ANALYTICS_KEYS) as $key) {
+            $errors[] = Craft::t('typesense-sync', 'Analytics sets an unknown key "{key}".', ['key' => $key]);
+        }
+
+        if (!array_key_exists('rules', $this->analytics)) {
+            return $errors;
+        }
+
+        if (!is_array($this->analytics['rules'])) {
+            $errors[] = Craft::t('typesense-sync', 'Analytics "rules" must be an array keyed by a handle.');
+
+            return $errors;
+        }
+
+        $eventsKey = $this->getAnalyticsEventsKey();
+
+        if ($eventsKey !== '' && $eventsKey === $this->getApiKey()) {
+            $errors[] = Craft::t('typesense-sync', 'The analytics events key is the admin API key. It is sent to browsers; create an events-only key with `craft typesense-sync/analytics/create-events-key`.');
+        }
+
+        $liveNames = self::liveNamesOf($collections);
+        $destinations = [];
+
+        foreach ($this->analytics['rules'] as $handle => $config) {
+            if (!is_string($handle) || !is_array($config)) {
+                $errors[] = Craft::t('typesense-sync', 'Analytics rule "{handle}" must be an array keyed by a handle.', ['handle' => (string)$handle]);
+                continue;
+            }
+
+            // A digit-led handle would make a destination that reads as a collection version.
+            if (!preg_match('/^[A-Za-z][A-Za-z0-9_-]*$/', $handle)) {
+                $errors[] = Craft::t('typesense-sync', 'Analytics rule "{handle}" must start with a letter and hold only letters, digits, "_" and "-".', ['handle' => $handle]);
+            }
+
+            foreach (array_diff(array_keys($config), AnalyticsRule::KEYS) as $key) {
+                $errors[] = Craft::t('typesense-sync', 'Analytics rule "{handle}" sets an unknown key "{key}".', ['handle' => $handle, 'key' => $key]);
+            }
+
+            $rule = AnalyticsRule::fromConfig($handle, $config);
+
+            if (!$rule->enabled) {
+                continue;
+            }
+
+            if (!in_array($rule->type, AnalyticsRule::TYPES, true)) {
+                $errors[] = Craft::t('typesense-sync', 'Analytics rule "{handle}" has unknown type "{type}"; expected one of {types}.', [
+                    'handle' => $handle,
+                    'type' => $rule->type,
+                    'types' => implode(', ', AnalyticsRule::TYPES),
+                ]);
+                continue;
+            }
+
+            if (!isset($liveNames[$rule->collection])) {
+                $errors[] = Craft::t('typesense-sync', 'Analytics rule "{handle}" names collection "{collection}", which is not declared.', [
+                    'handle' => $handle,
+                    'collection' => $rule->collection,
+                ]);
+                continue;
+            }
+
+            if ($rule->isCounter()) {
+                if ($rule->counterField === '' || $rule->eventType === '') {
+                    $errors[] = Craft::t('typesense-sync', 'Analytics rule "{handle}" needs a counterField and an eventType.', ['handle' => $handle]);
+                }
+
+                continue;
+            }
+
+            if ($rule->limit < 1) {
+                $errors[] = Craft::t('typesense-sync', 'Analytics rule "{handle}" has a limit below 1.', ['handle' => $handle]);
+            }
+
+            $destination = $rule->getDestination($liveNames[$rule->collection]);
+
+            if ($destination === '') {
+                $errors[] = Craft::t('typesense-sync', 'Analytics rule "{handle}" has a destination that resolves to nothing.', ['handle' => $handle]);
+                continue;
+            }
+
+            if (in_array($destination, $liveNames, true)) {
+                $errors[] = Craft::t('typesense-sync', 'Analytics rule "{handle}" aggregates into "{destination}", which is a declared collection.', [
+                    'handle' => $handle,
+                    'destination' => $destination,
+                ]);
+            }
+
+            if (isset($destinations[$destination])) {
+                $errors[] = Craft::t('typesense-sync', 'Analytics rules "{first}" and "{handle}" both aggregate into "{destination}".', [
+                    'first' => $destinations[$destination],
+                    'handle' => $handle,
+                    'destination' => $destination,
+                ]);
+            }
+
+            $destinations[$destination] = $handle;
         }
 
         return $errors;

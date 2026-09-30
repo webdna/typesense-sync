@@ -117,6 +117,21 @@ docker compose run --rm php composer validate --strict --no-plugins
   apply create an empty version and point search at it.
 - **A prune that runs after a query returned nothing deletes the whole collection.** Skip the prune
   when the run built zero documents.
+- **Analytics is off unless the server is started with it** (`--enable-search-analytics=true` and
+  `--analytics-dir`). A self-hosted server without the flags refuses every rule; Typesense Cloud
+  switches it on per cluster. The test container sets both.
+- **Analytics lands late and is rate-limited** (30.0, verified 30 Sep 2026). Whatever
+  `--analytics-flush-interval` says, aggregated queries appeared after ~10 s and counters after
+  ~30 s; `POST /analytics/flush` (admin) forces it, which is what the tests do. Events are capped
+  per client IP (`--analytics-minute-rate-limit`, default 5 a minute) and answered "event rate
+  limit reached" beyond it — harmless for real visitors, fatal for a test suite posting from one
+  container, so the container raises it.
+- **An analytics rule follows the alias it names.** After an alias swap the next event counted
+  into the new version, so a recreate does not break a rule (verified on 30.0). `POST
+  /analytics/rules` refuses a name that exists; `PUT /analytics/rules/<name>` creates or replaces
+  in place. A query rule is refused until its destination collection exists. A retrieved rule
+  carries keys the server filled in (`rule_tag`, `capture_search_requests`, `expand_query`), so
+  compare only the declared ones.
 
 ### Tooling
 

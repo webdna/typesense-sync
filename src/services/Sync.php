@@ -332,13 +332,14 @@ class Sync extends Component
     }
 
     /**
-     * Fields in a collection that Typesense maintains itself and a write must carry through.
+     * Fields in a collection that Typesense maintains itself and a write must carry through: the
+     * collection's `counters` and every enabled analytics counter rule's field (BR-14).
      *
      * @return string[]
      */
     public function counterFields(string $collection): array
     {
-        return array_values(array_unique($this->settings()->getCollectionConfig($collection)->counters ?? []));
+        return $this->settings()->getCounterFields($collection);
     }
 
     /**

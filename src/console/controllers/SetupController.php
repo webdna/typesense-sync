@@ -12,8 +12,8 @@ use yii\console\ExitCode;
 /**
  * Sets up a Typesense server for this site from nothing.
  *
- * Checks the config and the connection, creates or alters every declared collection, and
- * indexes their content. Safe to run again: apply changes only what differs, and indexing upserts.
+ * Checks the config and the connection, creates or alters every declared collection and analytics
+ * rule, and indexes their content. Safe to run again: apply changes only what differs, and indexing upserts.
  *
  * @since 1.0.0
  */
@@ -32,7 +32,8 @@ class SetupController extends Controller
     }
 
     /**
-     * Check the config and connection, apply every collection, then index their content.
+     * Check the config and connection, apply every collection and any analytics rules, then
+     * index their content.
      *
      * Refuses, changing nothing, on a config problem, an unreachable server or one older than
      * 30.0, or a search-only key that allows more than search.
@@ -82,6 +83,16 @@ class SetupController extends Controller
                 $ok = false;
             } elseif ($result['action'] !== Collections::ACTION_SKIP) {
                 $live[] = $handle;
+            }
+        }
+
+        // After the collections, which a counter rule needs its field in (BR-21).
+        if (self::plugin()->analytics->isEnabled()) {
+            $this->stdout("\n" . Craft::t('typesense-sync', 'Analytics') . "\n", Console::BOLD);
+            $ok = $this->applyRules() && $ok;
+
+            if (self::settings()->getAnalyticsEventsKey() === '' && array_filter(self::plugin()->analytics->getRules(), fn($rule) => $rule->isCounter()) !== []) {
+                $this->stdout('  ! ' . Craft::t('typesense-sync', 'No analytics events key is set, so pages cannot count views. Create one with `craft typesense-sync/analytics/create-events-key`.') . "\n", Console::FG_YELLOW);
             }
         }
 
