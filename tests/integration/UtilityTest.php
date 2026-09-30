@@ -21,6 +21,7 @@ use craft\models\FieldLayoutTab;
 use craft\models\Section;
 use craft\models\Section_SiteSettings;
 use craft\web\View;
+use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Throwable;
 use Typesense\Client as TypesenseClient;
 use webdna\typesensesync\elements\actions\Sync as SyncAction;
@@ -31,6 +32,7 @@ use webdna\typesensesync\jobs\SyncElement;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\WiderFormatter;
+use webdna\typesensesync\tests\fixtures\MockedClient;
 use webdna\typesensesync\tests\Support\TestCollections;
 use webdna\typesensesync\TypesenseSync;
 use webdna\typesensesync\utilities\Utility;
@@ -129,6 +131,26 @@ class UtilityTest extends Unit
         }
 
         $this->assertSame(0, $this->countJobs());
+    }
+
+    public function testTheSettingsConnectionTestIsCpOnlyAdminOnlyPostAndCsrfChecked(): void
+    {
+        $action = 'settings/test-connection';
+        $name = 'a' . bin2hex(random_bytes(4));
+        $admin = new User(['username' => $name, 'email' => $name . '@example.test', 'admin' => true]);
+        $this->assertTrue(Craft::$app->getElements()->saveElement($admin, false), implode(' ', $admin->getFirstErrors()));
+
+        $this->assertRefused(ForbiddenHttpException::class, $action, [], null);
+        $this->assertRefused(ForbiddenHttpException::class, $action, [], $this->user(['accessCp', Utility::PERMISSION]), [], 'the utility permission is not enough');
+        $this->assertRefused(BadRequestHttpException::class, $action, [], $admin, ['csrf' => false]);
+        $this->assertRefused(MethodNotAllowedHttpException::class, $action, [], $admin, ['method' => 'GET']);
+        $this->assertRefused(BadRequestHttpException::class, $action, [], $admin, ['cp' => false]);
+
+        // As the settings form posts it: the connection as it stands, saved or not.
+        $connection = ['settings' => array_intersect_key($this->settings()->toArray(), array_flip(['host', 'port', 'protocol', 'apiKey']))];
+        $response = $this->post($action, $connection, $admin);
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertTrue(($response->data['ok'] ?? null), 'an admin posting from the CP gets the result: ' . json_encode($response->data));
     }
 
     // TN-8, BR-22 ------------------------------------------------------------------------------
@@ -298,6 +320,33 @@ class UtilityTest extends Unit
         $this->assertStringContainsString('Could not reach', $this->render());
     }
 
+    public function testAServerOlderThan30IsNamedAndItsActionsRefused(): void
+    {
+        $original = $this->plugin->client;
+        $old = new MockedClient();
+        $this->plugin->set('client', $old);
+
+        try {
+            // Every check asks /debug once; each answer is a 29.0 server.
+            for ($i = 0; $i < 2; $i++) {
+                $old->handler->append(new GuzzleResponse(200, ['Content-Type' => 'application/json'], '{"state":1,"version":"29.0"}'));
+            }
+
+            $variables = Utility::variables();
+            $this->assertSame('unreachable', $variables['state'], 'BR-24: no collection rows for an old server');
+            $this->assertStringContainsString('Typesense 29.0 found; version 30.0 or later is required.', implode(' ', $variables['connectionProblems']));
+
+            $user = $this->user(['accessCp', Utility::PERMISSION]);
+            $response = $this->post('apply', ['collection' => 'content'], $user);
+            $this->assertSame(400, $response->getStatusCode(), 'TN-5');
+            $this->assertStringContainsString('30.0 or later is required', (string)json_encode($response->data));
+        } finally {
+            $this->plugin->set('client', $original);
+        }
+
+        $this->assertNull($this->plugin->collections->getActiveCollectionName('content'), 'nothing created');
+    }
+
     public function testConnectedWithNothingDeclaredTheUtilitySaysSo(): void
     {
         $this->useSettings($this->settings(['collections' => [], 'sources' => []]));
@@ -372,12 +421,12 @@ class UtilityTest extends Unit
      * @param array<string, mixed> $body
      * @param array<string, mixed> $options
      */
-    private function assertRefused(string $expected, string $action, array $body, ?User $user, array $options = []): void
+    private function assertRefused(string $expected, string $action, array $body, ?User $user, array $options = [], string $case = ''): void
     {
         try {
             $response = $this->post($action, $body, $user, $options);
         } catch (Throwable $e) {
-            $this->assertInstanceOf($expected, $e, sprintf('%s: %s', $action, $e->getMessage()));
+            $this->assertInstanceOf($expected, $e, trim(sprintf('%s %s: %s', $action, $case, $e->getMessage())));
 
             return;
         }
@@ -408,7 +457,9 @@ class UtilityTest extends Unit
         $request->setBodyParams($body);
         Craft::$app->getResponse()->clear();
 
-        $response = Craft::$app->runAction('typesense-sync/utility/' . $action);
+        // A bare name is a utility action; `settings/test-connection` names its controller.
+        $route = str_contains($action, '/') ? $action : 'utility/' . $action;
+        $response = Craft::$app->runAction('typesense-sync/' . $route);
         $this->assertInstanceOf(Response::class, $response);
 
         return $response;

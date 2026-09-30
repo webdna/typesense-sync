@@ -24,6 +24,7 @@ use webdna\typesensesync\tests\fixtures\formatters\RefusingFormatter;
 use webdna\typesensesync\tests\fixtures\MockedClient;
 use webdna\typesensesync\TypesenseSync;
 use yii\base\Event;
+use yii\log\Logger;
 
 /**
  * Sync with Typesense mocked: queueing and its dedupe flag (BR-6, BR-9), a single sync's
@@ -198,13 +199,18 @@ class SyncTest extends Unit
     {
         $this->respond(new ConnectException('Connection refused', new Request('POST', '/')));
 
-        try {
-            $this->sync()->syncElement($this->entry());
-            $this->fail('No exception was thrown.');
-        } catch (SyncException $e) {
-            $this->assertStringContainsString('document 42', $e->getMessage());
-            $this->assertStringContainsString('Connection refused', $e->getMessage());
-        }
+        $logged = $this->logged(function() {
+            try {
+                $this->sync()->syncElement($this->entry());
+                $this->fail('No exception was thrown.');
+            } catch (SyncException $e) {
+                $this->assertStringContainsString('document 42', $e->getMessage());
+                $this->assertStringContainsString('Connection refused', $e->getMessage());
+            }
+        });
+
+        $this->assertCount(1, $logged, 'TN-1: logged once, under the plugin category');
+        $this->assertStringContainsString('document 42', $logged[0]);
     }
 
     public function testTheElementJobsRetryAndGiveUpAfterTheirAttempts(): void
@@ -224,10 +230,15 @@ class SyncTest extends Unit
             '{"success":true}',
         ])));
 
-        $result = $this->sync()->import('content', [['id' => 'a'], ['id' => 'b'], ['id' => 'c']]);
+        $result = null;
+        $logged = $this->logged(function() use (&$result) {
+            $result = $this->sync()->import('content', [['id' => 'a'], ['id' => 'b'], ['id' => 'c']]);
+        });
 
         $this->assertSame(2, $result['written']);
         $this->assertSame(['b' => 'Field `priority` must be an int32.'], $result['rejected']);
+        $this->assertCount(1, $logged, 'TN-7: the rejected line is logged');
+        $this->assertStringContainsString('document b', $logged[0]);
     }
 
     public function testARejectedSingleDocumentIsNotRetried(): void
@@ -341,6 +352,30 @@ class SyncTest extends Unit
     }
 
     // Helpers -----------------------------------------------------------------------------------
+
+    /**
+     * The messages logged under the plugin's category (the test hook) while $run ran.
+     *
+     * @return list<string>
+     */
+    private function logged(callable $run): array
+    {
+        // The harness's logger keeps only its last few lines, as text; this one keeps them all.
+        $original = Craft::getLogger();
+        $capture = new Logger(['flushInterval' => 0]);
+        Craft::setLogger($capture);
+
+        try {
+            $run();
+        } finally {
+            Craft::setLogger($original);
+        }
+
+        return array_values(array_map(
+            fn(array $message) => (string)$message[0],
+            array_filter($capture->messages, fn(array $message) => $message[2] === TypesenseSync::HANDLE),
+        ));
+    }
 
     private function sync(): Sync
     {
