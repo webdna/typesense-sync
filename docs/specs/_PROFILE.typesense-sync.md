@@ -39,7 +39,12 @@ docker compose run --rm php composer test:integration
 docker compose run --rm php composer analyse       # phpstan
 docker compose run --rm php composer cs            # ecs check (cs-fix to apply)
 PHP_VERSION=8.4 docker compose run --rm php composer check   # the second CI leg
+docker compose run --rm php composer test:commerce  # the Commerce leg: own vendor dir, PHPStan + commerce suite
 ```
+
+`composer check` never installs Commerce; `test:commerce` (`tests/commerce/run.sh`) installs it
+into `vendor-commerce/` from a generated `composer.commerce.json`, so the main install proves the
+plugin works without it (BR-5). Run the Commerce leg on both PHP versions too.
 
 `validate` needs `--no-plugins`: with plugins loaded, `craftcms/plugin-installer` throws
 "$from (./vendor/craftcms) and $to (/app) must be absolute paths". On PHP 8.4, `composer cs` prints
@@ -59,6 +64,7 @@ throwaway Craft 5 install — never from LLL (see Traps).
 | Services | `src/services/` (registered as components in the plugin class) |
 | Queue jobs | `src/jobs/` |
 | Formatter contract + base | `src/formatters/` |
+| Optional-plugin knowledge (Commerce) | `src/helpers/Commerce.php` — the only place Commerce's classes are named, as strings |
 | Events | `src/events/` |
 | Exceptions | `src/errors/` |
 | Console controllers | `src/console/controllers/` |
@@ -140,6 +146,14 @@ docker compose run --rm php composer validate --strict --no-plugins
   (spam-blocker) omit both and fail with "Undefined constant".
 - **Codeception 5 reads `bootstrap:` at the top level of `codeception.yml`.** Under `settings:` it is
   silently ignored and Craft's constants are never defined.
+- **Codecept "redirects" itself to the vendor dir named in composer.json** ("Redirecting to
+  Composer-installed version in vendor/codeception"). Run from `vendor-commerce/` it silently
+  switches to the main install, which has no Commerce ("No plugin exists with the handle
+  commerce"); the Commerce leg passes `--no-redirect`.
+- **The two legs disagree about Commerce's classes.** Without Commerce, PHPStan rejects a
+  `@var class-string` on Commerce's class name; with it, the loadability check reads as always
+  true. `Commerce::productClass()` narrows with `is_subclass_of()`, and only the Commerce leg's
+  config ignores its two "always true" identifiers.
 - **`craftcms/phpstan` does not require PHPStan** — it only suggests it. `phpstan/phpstan` is its
   own dev requirement.
 

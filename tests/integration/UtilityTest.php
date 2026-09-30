@@ -24,6 +24,7 @@ use craft\web\View;
 use Throwable;
 use Typesense\Client as TypesenseClient;
 use webdna\typesensesync\elements\actions\Sync as SyncAction;
+use webdna\typesensesync\helpers\Commerce;
 use webdna\typesensesync\jobs\Recreate;
 use webdna\typesensesync\jobs\Reindex;
 use webdna\typesensesync\jobs\SyncElement;
@@ -343,6 +344,25 @@ class UtilityTest extends Unit
         $variables = Utility::variables();
         $this->assertNotEmpty($variables['problems']);
         $this->assertStringContainsString('Configuration problems', $this->render());
+    }
+
+    public function testAProductsSourceWithoutCommerceIsAWarningNotAProblem(): void
+    {
+        // TS-10 step 1 (BR-5).
+        $this->assertFalse(Commerce::isInstalled(), 'this leg runs without Commerce');
+        $this->useSettings($this->settings(['sources' => [
+            $this->source(DocumentFormatter::class),
+            ['kind' => 'productType', 'handle' => 'shoes', 'collection' => 'content', 'formatter' => DocumentFormatter::class],
+        ]]));
+
+        $variables = Utility::variables();
+        $this->assertSame([], $variables['problems']);
+        $this->assertSame('ready', $variables['state']);
+
+        $html = $this->render();
+        $this->assertStringContainsString('data-ts-section="warnings"', $html);
+        $this->assertStringContainsString('productType:shoes is ignored because Commerce is not installed.', $html);
+        $this->assertStringNotContainsString('Configuration problems', $html);
     }
 
     // Helpers ----------------------------------------------------------------------------------

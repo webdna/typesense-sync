@@ -1,0 +1,21 @@
+# The Commerce leg's analysis (tests/commerce/run.sh): src/ against Commerce's real classes, plus
+# this leg's tests, which the main analysis excludes because vendor/ has no Commerce.
+includes:
+    - ../../vendor-commerce/craftcms/phpstan/phpstan.neon
+
+parameters:
+    level: 6
+    paths:
+        - ../../src
+        - .
+    excludePaths:
+        - run.sh
+    # The helper asks whether Commerce can be loaded, which is always true here and is the whole
+    # point on a site without it. Only these two checks, only in that file, only in this leg.
+    ignoreErrors:
+        -
+            identifier: function.alreadyNarrowedType
+            path: ../../src/helpers/Commerce.php
+        -
+            identifier: return.unusedType
+            path: ../../src/helpers/Commerce.php

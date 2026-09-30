@@ -14,6 +14,7 @@ use webdna\typesensesync\events\RegisterElementTypesEvent;
 use webdna\typesensesync\events\ResolveTargetEvent;
 use webdna\typesensesync\formatters\BaseFormatter;
 use webdna\typesensesync\formatters\FormatterInterface;
+use webdna\typesensesync\helpers\Commerce;
 use webdna\typesensesync\models\ResolvedTarget;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\models\SourceConfig;
@@ -146,8 +147,9 @@ class Targets extends Component
     }
 
     /**
-     * Element types whose saves, deletes and restores are followed: entries, and categories and
-     * users only while a source of that kind is declared, plus any a handler registers.
+     * Element types whose saves, deletes and restores are followed: entries, and categories,
+     * users and products only while a source of that kind is declared, plus any a handler
+     * registers.
      *
      * @return array<int, class-string<ElementInterface>>
      */
@@ -162,6 +164,14 @@ class Targets extends Component
 
         if (in_array(SourceConfig::KIND_USERS, $kinds, true)) {
             $types[] = User::class;
+        }
+
+        // getSourceConfigs() already drops a product type source while Commerce is not
+        // installed, and the class is only named when it can be loaded (BR-5).
+        $product = Commerce::productClass();
+
+        if ($product !== null && in_array(SourceConfig::KIND_PRODUCT_TYPE, $kinds, true)) {
+            $types[] = $product;
         }
 
         if ($this->hasEventHandlers(self::EVENT_REGISTER_ELEMENT_TYPES)) {
@@ -201,6 +211,14 @@ class Targets extends Component
             // formatter's shouldIndex(), so a user who stops qualifying is synced — and deleted —
             // rather than skipped.
             return $settings->resolveTarget(SourceConfig::KIND_USERS);
+        }
+
+        // A product resolves by its type. Its variants are not documents of their own; a
+        // formatter reaches them through the product.
+        $productType = Commerce::productTypeOf($element);
+
+        if ($productType !== null) {
+            return $settings->resolveTarget(SourceConfig::KIND_PRODUCT_TYPE, $productType['handle']);
         }
 
         return null;
