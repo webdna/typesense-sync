@@ -843,7 +843,7 @@ class Settings extends Model
      * Marks a target unusable when its collection is undeclared or its formatter is not a
      * formatter, so it queues nothing (TN-3).
      */
-    private function markValidity(ResolvedTarget $target): ResolvedTarget
+    public function markValidity(ResolvedTarget $target): ResolvedTarget
     {
         $target->valid = $target->collection !== null
             && $this->getCollectionConfig($target->collection) !== null
