@@ -7,12 +7,15 @@ use craft\base\Element;
 use craft\base\ElementInterface;
 use craft\base\Model;
 use craft\base\Plugin;
+use craft\web\twig\variables\CraftVariable;
 use Throwable;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\services\Client;
 use webdna\typesensesync\services\Collections;
+use webdna\typesensesync\services\Search;
 use webdna\typesensesync\services\Sync;
 use webdna\typesensesync\services\Targets;
+use webdna\typesensesync\variables\TypesenseVariable;
 use yii\base\Event;
 
 /**
@@ -30,6 +33,7 @@ use yii\base\Event;
  * @property-read Targets $targets
  * @property-read Sync $sync
  * @property-read Collections $collections
+ * @property-read Search $search
  */
 class TypesenseSync extends Plugin
 {
@@ -53,6 +57,7 @@ class TypesenseSync extends Plugin
                 'targets' => Targets::class,
                 'sync' => Sync::class,
                 'collections' => Collections::class,
+                'search' => Search::class,
             ],
         ];
     }
@@ -62,6 +67,12 @@ class TypesenseSync extends Plugin
         parent::init();
 
         $this->applyFileOnlySettings();
+
+        Event::on(CraftVariable::class, CraftVariable::EVENT_INIT, function(Event $event): void {
+            /** @var CraftVariable $variable */
+            $variable = $event->sender;
+            $variable->set('typesense', TypesenseVariable::class);
+        });
 
         // Once every plugin has loaded, so their EVENT_REGISTER_ELEMENT_TYPES handlers count.
         Craft::$app->onInit(fn() => $this->registerElementEvents());
