@@ -7,9 +7,13 @@ use craft\base\Element;
 use craft\base\ElementInterface;
 use craft\base\Model;
 use craft\base\Plugin;
+use craft\elements\User;
 use craft\events\DefineMenuItemsEvent;
 use craft\events\RegisterComponentTypesEvent;
 use craft\events\RegisterElementActionsEvent;
+use craft\events\UserEvent;
+use craft\events\UserGroupsAssignEvent;
+use craft\services\Users;
 use craft\services\Utilities;
 use craft\web\twig\variables\CraftVariable;
 use Throwable;
@@ -88,7 +92,7 @@ class TypesenseSync extends Plugin
         });
 
         // Once every plugin has loaded, so their EVENT_REGISTER_ELEMENT_TYPES handlers count.
-        Craft::$app->onInit(fn() => $this->registerElementEvents());
+        Craft::$app->onInit(fn() => $this->followElementTypes());
     }
 
     /**
@@ -129,48 +133,125 @@ class TypesenseSync extends Plugin
     }
 
     /**
-     * Saves, deletes and restores of the followed element types queue work (BR-6). Which
-     * elements actually queue anything is `sync`'s question; this only listens.
+     * User service events that change a user's status or groups by writing the `users` table
+     * directly. None of them saves the element, so the save listener never sees them (BR-7).
+     */
+    public const USER_LIFECYCLE_EVENTS = [
+        Users::EVENT_AFTER_ACTIVATE_USER,
+        Users::EVENT_AFTER_DEACTIVATE_USER,
+        Users::EVENT_AFTER_SUSPEND_USER,
+        Users::EVENT_AFTER_UNSUSPEND_USER,
+        Users::EVENT_AFTER_LOCK_USER,
+        Users::EVENT_AFTER_UNLOCK_USER,
+        Users::EVENT_AFTER_ASSIGN_USER_TO_GROUPS,
+    ];
+
+    /**
+     * Element types whose events are wired already, so following again never doubles a handler.
+     *
+     * @var array<string, true>
+     */
+    private array $followed = [];
+
+    /**
+     * Wires saves, deletes and restores of each element type `targets` lists that is not wired
+     * yet (BR-6), and the user lifecycle events once users are followed (BR-7). Which elements
+     * actually queue anything is `sync`'s question; this only listens, so a listener left behind
+     * by a source that is no longer declared queues nothing (BR-1).
+     *
+     * Runs once every plugin has loaded, and is safe to call again after the settings change.
      *
      * A handler never lets an exception reach the save that fired it (BR-10): queueing touches
      * only the cache and the queue table, and a failure there is logged, not thrown at an editor.
      */
-    private function registerElementEvents(): void
+    public function followElementTypes(): void
     {
-        $queue = function(string $action, Event $event): void {
-            $element = $event->sender;
-
-            if (!$element instanceof ElementInterface) {
-                return;
+        foreach ($this->targets->getElementTypes() as $type) {
+            if (isset($this->followed[$type])) {
+                continue;
             }
 
-            try {
-                $action === 'delete' ? $this->sync->queueDelete($element) : $this->sync->queueElement($element);
-            } catch (Throwable $e) {
-                Craft::error(sprintf('Could not queue a Typesense %s for element %s: %s', $action, $element->id, $e->getMessage()), self::HANDLE);
+            $this->followed[$type] = true;
+            $this->followElementType($type);
+
+            if (is_a($type, User::class, true)) {
+                $this->followUserLifecycle();
+            }
+        }
+    }
+
+    /**
+     * @param class-string<ElementInterface> $type
+     */
+    private function followElementType(string $type): void
+    {
+        $queue = function(string $action, Event $event): void {
+            if ($event->sender instanceof ElementInterface) {
+                $this->queueSafely($action, $event->sender);
             }
         };
 
-        foreach ($this->targets->getElementTypes() as $type) {
-            Event::on($type, Element::EVENT_AFTER_SAVE, fn(Event $event) => $queue('sync', $event));
-            // Craft hard-deletes a provisional draft on every CP save, which fires this too; the
-            // draft guard in Targets::isSyncable() is what keeps that from deleting the document.
-            Event::on($type, Element::EVENT_AFTER_DELETE, fn(Event $event) => $queue('delete', $event));
-            // Soft-deleted elements come back, and so must their documents.
-            Event::on($type, Element::EVENT_AFTER_RESTORE, fn(Event $event) => $queue('sync', $event));
+        Event::on($type, Element::EVENT_AFTER_SAVE, fn(Event $event) => $queue('sync', $event));
+        // Craft hard-deletes a provisional draft on every CP save, which fires this too; the
+        // draft guard in Targets::isSyncable() is what keeps that from deleting the document.
+        Event::on($type, Element::EVENT_AFTER_DELETE, fn(Event $event) => $queue('delete', $event));
+        // Soft-deleted elements come back, and so must their documents.
+        Event::on($type, Element::EVENT_AFTER_RESTORE, fn(Event $event) => $queue('sync', $event));
 
-            Event::on($type, Element::EVENT_REGISTER_ACTIONS, function(RegisterElementActionsEvent $event): void {
-                if (self::canSync()) {
-                    $event->actions[] = SyncAction::class;
+        Event::on($type, Element::EVENT_REGISTER_ACTIONS, function(RegisterElementActionsEvent $event): void {
+            if (self::canSync()) {
+                $event->actions[] = SyncAction::class;
+            }
+        });
+        Event::on($type, Element::EVENT_DEFINE_ACTION_MENU_ITEMS, function(DefineMenuItemsEvent $event): void {
+            $element = $event->sender;
+
+            if ($element instanceof ElementInterface && ($item = $this->syncMenuItem($element)) !== null) {
+                $event->items[] = $item;
+            }
+        });
+    }
+
+    /**
+     * Status and group changes reach search without a save (BR-7). Each queues a sync of the
+     * user, which re-derives everything, so the formatter's shouldIndex() decides whether the
+     * user stays listed; a users source no longer declared queues nothing.
+     */
+    private function followUserLifecycle(): void
+    {
+        foreach (self::USER_LIFECYCLE_EVENTS as $name) {
+            Event::on(Users::class, $name, function(Event $event): void {
+                if ($event instanceof UserEvent) {
+                    $this->queueSafely('sync', $event->user);
+
+                    return;
+                }
+
+                // A group assignment carries only an id. Any status: a suspended or pending user
+                // must still be synced, if only to be removed.
+                if ($event instanceof UserGroupsAssignEvent) {
+                    try {
+                        $user = User::find()->id($event->userId)->status(null)->one();
+                    } catch (Throwable $e) {
+                        Craft::error(sprintf('Could not load user %s to queue a Typesense sync: %s', $event->userId, $e->getMessage()), self::HANDLE);
+
+                        return;
+                    }
+
+                    if ($user !== null) {
+                        $this->queueSafely('sync', $user);
+                    }
                 }
             });
-            Event::on($type, Element::EVENT_DEFINE_ACTION_MENU_ITEMS, function(DefineMenuItemsEvent $event): void {
-                $element = $event->sender;
+        }
+    }
 
-                if ($element instanceof ElementInterface && ($item = $this->syncMenuItem($element)) !== null) {
-                    $event->items[] = $item;
-                }
-            });
+    private function queueSafely(string $action, ElementInterface $element): void
+    {
+        try {
+            $action === 'delete' ? $this->sync->queueDelete($element) : $this->sync->queueElement($element);
+        } catch (Throwable $e) {
+            Craft::error(sprintf('Could not queue a Typesense %s for element %s: %s', $action, $element->id, $e->getMessage()), self::HANDLE);
         }
     }
 
