@@ -129,8 +129,14 @@ docker compose run --rm php composer validate --strict --no-plugins
 - **Nested entries (Matrix) have no section.** Resolving them as sources indexes fragments of pages.
 - **Absolute URLs in documents break multi-environment clusters.** One Typesense cluster commonly
   serves every environment; store root-relative URLs.
-- **Craft applies `config/<handle>.php` over the plugin's Settings model**, and an unknown key is an
-  error. Every key the config file may carry must be a declared Settings property.
+- **Craft applies `config/<handle>.php` over the plugin's Settings model and silently drops an
+  unknown key** (`Plugins::createPlugin()` → `setAttributes($settings, false)`; verified in Craft 5,
+  30 Sep 2026). A typo'd key simply does nothing, so `Settings::getProblems()` names unknown keys
+  itself — at the top level and inside every collection, source and override. A new config key
+  must be added to the model's property list or the matching `KEYS` constant, or it is reported.
+- **A CP settings save writes only the posted keys** (`toArray(array_keys($posted))`), and a
+  crafted POST can name any attribute. `Settings::fields()` leaves `collections`, `sources` and
+  `analytics` out, which is what keeps them out of project config.
 - **A static or page cache that outlives a scoped key's TTL** serves an expired key and search
   silently fails for anonymous visitors.
 

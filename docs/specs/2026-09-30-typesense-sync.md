@@ -451,7 +451,7 @@ cannot be filled is a missing extension point and is fixed here, not in LLL.
 | TN-11 | Template helper called with no settings | Returns null, page renders (BR-20) |
 | TN-12 | Populate fails mid-recreate | New version deleted, alias unchanged, error shown (BR-15) |
 | TN-13 | Save lands while its own sync job is running | A second job runs after (BR-9) |
-| TN-14 | Config file sets an unknown key | Craft's error names the key (profile trap); README lists valid keys |
+| TN-14 | Config file sets an unknown key | Listed as a problem naming the key — Craft itself ignores it silently; README lists valid keys |
 
 ### Automated checks
 
@@ -500,8 +500,9 @@ Phases 4–7 are independent once 3 is done; build them in number order unless o
 
 - [x] **1.1 Scaffold** — `composer.json`, `src/TypesenseSync.php`, `docker-compose.yml`, `codeception.yml`, `tests/_craft/`, `phpstan.neon`, `ecs.php`, `.github/workflows/ci.yml`, `LICENSE.md`
       Rules: BR-26 · Verify: B5 #1, #3
-- [ ] **1.2 Settings model, CP settings screen, config parsing and validation** — `src/models/{Settings,CollectionConfig,SourceConfig,ResolvedTarget}.php`, `src/templates/settings.twig`
+- [x] **1.2 Settings model, CP settings screen, config parsing and validation** — `src/models/{Settings,CollectionConfig,SourceConfig,ResolvedTarget}.php`, `src/templates/settings.twig`
       Rules: BR-2, BR-3, BR-4, BR-5 · Verify: unit suite, TN-3, TN-4, TN-14
+      *As built (30 Sep 2026):* config shape is `collections` (keyed by handle: `name`, `schema`, `defaultSortingField`, `enableNestedFields`, `counters`, `search.{publicationWindow,excludeFields}`) and `sources` (a list, each `kind` = `section`|`categoryGroup`|`productType`|`users` (default `section`), `handle`, `collection`, `formatter`, `enabled` (default **true**), `priority`, `site`, `entryTypes` — sections only). An override can switch a type off but never on inside a disabled source. **Craft drops an unknown config-file key silently** (`setAttributes(…, false)`), so `getProblems()` names unknown keys at every level itself (TN-14). File-only keys are kept out of project config by `Settings::fields()` and re-read from the file in `init()`. `port` is an env-aware string (`getPort()`); the tuning numbers are plain integers. Problems are errors; `getWarnings()` holds BR-5. `FormatterInterface` and a minimal `SchemaContext` (`reference(handle)`) were built here because BR-4's field and reference checks call `schema()`; 2.2 adds `BaseFormatter` and anything more the context needs. A self-reference counts as a cycle. The settings screen lists problems until the utility (5.1) exists; the *Test connection* button is 2.1's.
 - [ ] **2.1 Client service with bounded timeouts, version gate, test-connection action** — `src/services/Client.php`, `src/controllers/SettingsController.php`
       Rules: BR-10, BR-19, BR-24 · Verify: TS-1, TN-5
 - [ ] **2.2 Targets and formatter contract** — `src/services/Targets.php`, `src/formatters/{FormatterInterface,BaseFormatter,SchemaContext}.php`, `src/events/*`
@@ -641,3 +642,4 @@ PHP_VERSION=8.4 docker compose run --rm php composer check
 | Date | Version | Change | By |
 |---|---|---|---|
 | 2026-09-30 | 0.1 | First draft, from the approved brainstorm | Claude |
+| 2026-09-30 | 0.1 | Task 1.2 built; TN-14 corrected (Craft ignores unknown config keys, the plugin reports them) | Claude |

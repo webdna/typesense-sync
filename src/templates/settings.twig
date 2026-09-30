@@ -1,0 +1,183 @@
+{#
+  Typesense Sync plugin settings.
+
+  Only the connection is edited here. Collections, sources and analytics are declared in
+  config/typesense-sync.php and never saved to project config (BR-2).
+
+  The admin key is rendered only as an environment variable reference; a literal key is never
+  written into the page, only its last four characters as a placeholder (BR-17). A blank field
+  keeps the saved key (TypesenseSync::beforeSaveSettings()).
+#}
+{% import '_includes/forms.twig' as forms %}
+
+{% macro configWarning(setting, overrides) %}
+  {%- if setting in overrides -%}
+    {{ 'This is being overridden by the {setting} config setting.'|t('app', {setting: setting}) }}
+  {%- endif -%}
+{% endmacro %}
+{% from _self import configWarning %}
+
+<h2>{{ 'Connection'|t('typesense-sync') }}</h2>
+
+{{ forms.autosuggestField({
+  label: 'Host'|t('typesense-sync'),
+  instructions: 'The Typesense server’s host name, without the protocol or port.'|t('typesense-sync'),
+  id: 'host',
+  name: 'host',
+  value: settings.host,
+  suggestEnvVars: true,
+  required: true,
+  errors: settings.getErrors('host'),
+  warning: configWarning('host', overrides),
+}) }}
+
+{{ forms.autosuggestField({
+  label: 'Port'|t('typesense-sync'),
+  id: 'port',
+  name: 'port',
+  value: settings.port,
+  suggestEnvVars: true,
+  errors: settings.getErrors('port'),
+  warning: configWarning('port', overrides),
+}) }}
+
+{{ forms.autosuggestField({
+  label: 'Protocol'|t('typesense-sync'),
+  instructions: '`https` or `http`.'|t('typesense-sync'),
+  id: 'protocol',
+  name: 'protocol',
+  value: settings.protocol,
+  suggestEnvVars: true,
+  errors: settings.getErrors('protocol'),
+  warning: configWarning('protocol', overrides),
+}) }}
+
+{{ forms.autosuggestField({
+  label: 'Admin API key'|t('typesense-sync'),
+  instructions: 'Used only on the server, to write documents and manage collections. Use an environment variable. A key typed in directly is never shown again; leave the field blank to keep it.'|t('typesense-sync'),
+  id: 'apiKey',
+  name: 'apiKey',
+  value: apiKeyValue,
+  placeholder: maskedApiKey,
+  suggestEnvVars: true,
+  required: true,
+  errors: settings.getErrors('apiKey'),
+  warning: configWarning('apiKey', overrides),
+}) }}
+
+{{ forms.autosuggestField({
+  label: 'Search-only API key'|t('typesense-sync'),
+  instructions: 'A key allowed only `documents:search`. Search pages get short-lived keys signed with it; the admin key is never used for that.'|t('typesense-sync'),
+  id: 'searchApiKey',
+  name: 'searchApiKey',
+  value: settings.searchApiKey,
+  suggestEnvVars: true,
+  errors: settings.getErrors('searchApiKey'),
+  warning: configWarning('searchApiKey', overrides),
+}) }}
+
+{{ forms.autosuggestField({
+  label: 'Collection prefix'|t('typesense-sync'),
+  instructions: 'Put in front of each collection’s handle to make its name, so several environments can share one server. A collection that sets its own `name` ignores it.'|t('typesense-sync'),
+  id: 'collectionPrefix',
+  name: 'collectionPrefix',
+  value: settings.collectionPrefix,
+  suggestEnvVars: true,
+  errors: settings.getErrors('collectionPrefix'),
+  warning: configWarning('collectionPrefix', overrides),
+}) }}
+
+<hr>
+
+<h2>{{ 'Limits'|t('typesense-sync') }}</h2>
+
+{{ forms.textField({
+  label: 'Connect timeout'|t('typesense-sync'),
+  instructions: 'Seconds to wait for the server to accept a connection.'|t('typesense-sync'),
+  id: 'connectTimeout',
+  name: 'connectTimeout',
+  type: 'number',
+  min: 1,
+  size: 5,
+  value: settings.connectTimeout,
+  errors: settings.getErrors('connectTimeout'),
+  warning: configWarning('connectTimeout', overrides),
+}) }}
+
+{{ forms.textField({
+  label: 'Request timeout'|t('typesense-sync'),
+  instructions: 'Seconds to wait for a response.'|t('typesense-sync'),
+  id: 'timeout',
+  name: 'timeout',
+  type: 'number',
+  min: 1,
+  size: 5,
+  value: settings.timeout,
+  errors: settings.getErrors('timeout'),
+  warning: configWarning('timeout', overrides),
+}) }}
+
+{{ forms.textField({
+  label: 'Retries'|t('typesense-sync'),
+  id: 'numRetries',
+  name: 'numRetries',
+  type: 'number',
+  min: 0,
+  size: 5,
+  value: settings.numRetries,
+  errors: settings.getErrors('numRetries'),
+  warning: configWarning('numRetries', overrides),
+}) }}
+
+{{ forms.textField({
+  label: 'Queue priority'|t('typesense-sync'),
+  instructions: 'Priority of sync jobs in Craft’s queue. Lower runs sooner; Craft’s default is 1024.'|t('typesense-sync'),
+  id: 'queuePriority',
+  name: 'queuePriority',
+  type: 'number',
+  min: 0,
+  size: 5,
+  value: settings.queuePriority,
+  errors: settings.getErrors('queuePriority'),
+  warning: configWarning('queuePriority', overrides),
+}) }}
+
+{{ forms.textField({
+  label: 'Batch size'|t('typesense-sync'),
+  instructions: 'Documents sent per request during a reindex.'|t('typesense-sync'),
+  id: 'batchSize',
+  name: 'batchSize',
+  type: 'number',
+  min: 1,
+  size: 5,
+  value: settings.batchSize,
+  errors: settings.getErrors('batchSize'),
+  warning: configWarning('batchSize', overrides),
+}) }}
+
+<hr>
+
+<h2>{{ 'Collections and sources'|t('typesense-sync') }}</h2>
+
+<p>{{ 'What is indexed, and into which collection, is declared in `config/typesense-sync.php`, never here.'|t('typesense-sync')|md(inlineOnly=true) }}</p>
+
+{% if problems is not empty %}
+  <div class="error" data-ts-problems>
+    <p><strong>{{ 'The configuration file has problems:'|t('typesense-sync') }}</strong></p>
+    <ul class="bullets">
+      {% for problem in problems %}
+        <li>{{ problem }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}
+
+{% if warnings is not empty %}
+  <div class="warning" data-ts-warnings>
+    <ul class="bullets">
+      {% for warning in warnings %}
+        <li>{{ warning }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}

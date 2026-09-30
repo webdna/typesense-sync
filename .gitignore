@@ -5,3 +5,4 @@
 .idea
 .vscode
 /tests/Support/_generated
+/cpresources
