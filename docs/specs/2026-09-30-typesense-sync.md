@@ -234,13 +234,14 @@ them.
 | POST | `actions/typesense-sync/utility/sync-element` | Queue one element | `utility:typesense-sync` | Redirect + flash, or JSON |
 | POST | `actions/typesense-sync/utility/reindex` | Queue a reindex (optional prune) | `utility:typesense-sync` | Redirect + flash |
 | POST | `actions/typesense-sync/utility/apply` | Apply schema | `utility:typesense-sync` | Redirect + flash |
-| POST | `actions/typesense-sync/utility/recreate` | Recreate (typed confirm) | `utility:typesense-sync` | Redirect + flash |
+| POST | `actions/typesense-sync/utility/recreate` | Queue a recreate (typed confirm) | `utility:typesense-sync` | Redirect + flash |
 
 **Console** (`typesense-sync/…`): `setup [--skip-sync]` · `sync [--collection] [--prune] [--queue]` ·
-`sync/element <id> [--site]` · `flush <collection>` (confirms) · `collections/status` ·
+`sync/element <id> [--site]` · `sync/flush <collection>` (confirms) · `collections/status` ·
 `collections/apply [--collection] [--dry-run]` · `collections/recreate --collection` (confirms) ·
-`analytics/status|apply|report|create-events-key|remove [--dry-run] [--limit]`. Every command exits
-non-zero on failure.
+`analytics/status|apply|report|create-events-key|remove [--dry-run] [--limit]`. The two that
+confirm also take `--confirm=<handle>`. Every command exits non-zero on failure, except that a
+skipped prune and an analytics command with nothing declared exit 0.
 
 **Twig** — `craft.typesense`: `searchConfig(handle, {filter, ttl})` → `{host, port, protocol,
 collection, apiKey, expiresAt}` · `scopedKey(handle, params)` · `collectionName(handle)` · `analyticsConfig()` ·
@@ -542,8 +543,9 @@ Phases 4–7 are independent once 3 is done; build them in number order unless o
 - [x] **8.2 README, CHANGELOG, icons, translations, draft Store listing** — `README.md`, `CHANGELOG.md`, `src/icon.svg`, `src/icon-mask.svg`, `src/translations/en/typesense-sync.php`, `docs/store-listing.md`
       Rules: BR-25, BR-26, BR-27 · Verify: B5 #2, #3, TS-11
       *As built (30 Sep 2026):* **README** covers requirements, install, a four-step start (connect, including a `curl` that makes a search-only key; copy the base example; `setup`; `searchConfig()` in Twig), how the index follows content (including the two things it does not follow: documents that read other elements, and an entry moved into an undeclared section or type), the **full configuration reference** (every key at every level with its default and whether it is env-aware, plus what is validated — TN-14), writing a formatter, search pages and key caveats (a key's embedded params are readable, a key is not limited to one collection, a page cache must not outlive `ttl`), joins, analytics, the utility and permission, console commands with exit codes, **extension points** (BR-27: `queueElement()` and all six events, each with its event class, its properties, when it fires and an example — including the limits of routing an undeclared element type in through `EVENT_REGISTER_ELEMENT_TYPES` + `EVENT_RESOLVE_TARGET`: a reindex does not walk such elements, and their fields must be declared by a source's formatter or the collection's `schema`), several environments, troubleshooting, and **uninstalling** (collections are left on the server; `analytics/remove` first, then `DELETE` each alias and version). `tests/unit/ReadmeTest.php` fails if a config key the models accept (Settings' own public properties, every `KEYS` / `SEARCH_KEYS` / `OVERRIDE_KEYS` / `KINDS` / `ANALYTICS_KEYS` / `TYPES` list) or a BR-27 event heading goes missing from the README — that is TS-11 step 4, automated. **CHANGELOG** `## 1.0.0-beta.1 - 2026-09-30`: 8.3 must change the date if it tags later. **Icons** follow the webdna house style (70×70 black tile with a white line glyph; the mask is the glyph alone, `#848D94`, in a 40×40 box): a magnifier holding two sync arrows. It is a draft for Appendix A #4. ImageMagick's built-in SVG renderer draws no strokes, so preview with `qlmanage -t`. **Translations, and the boundary of BR-26:** every string a person reads in the CP or the console goes through `Craft::t('typesense-sync', …)`, and so does every exception message. 45 raw `sprintf`/literal messages in `Collections` (0 calls before), `Sync`, `Analytics`, `CollectionConfig`, `jobs/Reindex` and `UtilityController` were converted with `{named}` placeholders; one is an ICU plural. Yii substitutes `{name}` directly unless the message holds ICU syntax, so the English text is unchanged. **Log lines (`Craft::warning/error/info`) stay English, as in Craft core.** `src/translations/en/typesense-sync.php` holds 267 strings, each mapped to itself. `tests/unit/TranslationsTest.php` fails when a `Craft::t` / `|t` string in `src/` is missing from it, or when any exception is thrown with a bare literal or `sprintf()`. It also checks that a placeholder and a plural are filled through the file. Mutation-checked: dropping one entry and adding a bare-literal exception each fail. **The utility's analytics row, left open by 6.1, is built:** `Utility::variables()['analytics']` is null while analytics is off, and otherwise `analytics->diff()`'s rules, the unmanaged names and any error (a server without analytics shows its refusal on the pane, not an error page). `_utility.twig` renders a read-only pane: rule, type, collection and state (`Up to date` / `Differs from the config` / `Not on the server`), `php craft typesense-sync/analytics/apply` named while any rule is not ok, and rules on the server not declared here listed as left alone. It has no CP button, so §6's action table is unchanged, and the events key those rules may need is also made from the console. Hooks: `data-ts-section="analytics"`, `data-analytics-rule="<handle>"`, `data-ts-analytics="missing|differs|ok"`. Test: `AnalyticsTest::testTheUtilityShowsEachRulesStateAndPointsAtTheApplyCommand` (missing ×3 with the command, ok ×3 without it, a changed limit reads `differs`, analytics off means no pane). **Store listing** draft in `docs/store-listing.md`: fields, long description, screenshots to take, and the pre-submission checklist from Appendix A. **Not done (manual, Sam's):** TS-11 steps 2–3 (a fresh Craft 5.6 install via a path repository, and the Store submission preview). In the craft5 sandbox, `collections/status` and `apply --dry-run` ran on the new strings (`craft5_content_2 is up to date.`). 201 unit + 92 integration + 7 commerce green on 8.2 + 8.4; B5 #2 prints nothing; B5 #3 valid.
-- [ ] **8.3 Beta** — full check green on both PHP legs, tag `1.0.0-beta.1` locally
+- [x] **8.3 Beta** — full check green on both PHP legs, tag `1.0.0-beta.1` locally
       Rules: all · Verify: B5 #1–#3, B4
+      *As built (30 Sep 2026):* B5 #1–#5 all green on PHP 8.2.34 and 8.4.26: ECS "No errors found", PHPStan "[OK] No errors", **202 unit + 96 integration** (`composer check`) and PHPStan + **7 commerce** (`test:commerce`) on each leg; #2 prints nothing; #3 valid. **B4 traceability** was surveyed AC → test, BR → enforcing code → test, TN, regression, hook and §6 map row → interface. All 27 BRs have enforcing code and all ten map rows name interfaces that exist. The gaps it found were closed with tests rather than accepted: `settings/test-connection`'s guard (anonymous, the utility permission alone, no CSRF, GET, a site request, then an admin gets `ok`: `UtilityTest::testTheSettingsConnectionTestIsCpOnlyAdminOnlyPostAndCsrfChecked`, mutation-checked by removing `requireAdmin(false)`), BR-24 / TN-5 beyond the client (`setup`, `collections/apply`, the utility's state and its `apply` action against a mocked 29.0 `/debug`: `ConsoleTest::testSetupAndApplyRefuseAServerOlderThan30`, `UtilityTest::testAServerOlderThan30IsNamedAndItsActionsRefused`), BR-12's batch size (`SyncTest::testAReindexWritesInBatchesOfTheBatchSize`, five entries at size 2 report progress 2, 4, 5), the `typesense-sync` log category (TN-1, TN-7: the unit `SyncTest` swaps in a plain `yii\log\Logger`, because **the Codeception Yii2 harness's logger keeps only its last five lines as text**; mutation-checked by removing `failure()`'s `Craft::error`), and BR-25 as a test (`tests/unit/SiteNamesTest.php`, B5 #2's pattern). CI gained the Commerce leg (B5 #5) after `composer check`. §6's console line now reads `sync/flush` with `--confirm` and the two exit-0 cases, and recreate is "Queue a recreate". CHANGELOG's `1.0.0-beta.1 - 2026-09-30` is today, unchanged. Tagged `1.0.0-beta.1` locally (annotated), not pushed. **Unrun, Sam's:** TS-1 in a fresh site, the TS-5 browser pass, the utility browser pass, TS-11 steps 2–3; also the typed-handle console mutation check from 5.2.
 
 ---
 
@@ -607,13 +609,13 @@ the rest (§6 migration map).
 
 ## B4. Definition of done
 
-- [ ] Every AC in §7 passes
-- [ ] Every BR in §5 is enforced, not merely intended
-- [ ] The negative cases in §7 behave as specified
-- [ ] The regression checks in §7 pass
-- [ ] The test hooks in §7 exist
-- [ ] B5 runs clean on PHP 8.2 and 8.4
-- [ ] Every §6 migration-map row names an interface that exists
+- [ ] Every AC in §7 passes — every automated check passes (8.3); the manual checks in B5's table are unrun
+- [x] Every BR in §5 is enforced, not merely intended
+- [x] The negative cases in §7 behave as specified
+- [x] The regression checks in §7 pass
+- [x] The test hooks in §7 exist
+- [x] B5 runs clean on PHP 8.2 and 8.4
+- [x] Every §6 migration-map row names an interface that exists
 
 ## B5. Verification
 
@@ -673,3 +675,4 @@ PHP_VERSION=8.4 docker compose run --rm php composer test:commerce
 | 2026-09-30 | 0.1 | Task 7.2 built; Commerce knowledge in one string-named helper, the Commerce leg is `composer test:commerce` (B5 #5) in its own vendor dir, variant-only saves are a known gap | Claude |
 | 2026-09-30 | 0.1 | Task 8.1 built; TS-2 and TS-9 run on the examples, the joins example turns off `cascade_delete`, and the user example lists only people with a name | Claude |
 | 2026-09-30 | 0.1 | Task 8.2 built; BR-26 covers exception messages but not log lines; the utility's analytics pane (§6 Screens) is built read-only; README key and event coverage is tested | Claude |
+| 2026-09-30 | 0.1 | Task 8.3: B5 green on both legs, B4 gaps closed with tests (settings guard, BR-24 at setup and utility, batch size, log category, BR-25), Commerce leg in CI, §6 console line as built; tagged `1.0.0-beta.1` | Claude |

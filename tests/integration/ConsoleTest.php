@@ -17,6 +17,7 @@ use craft\models\FieldLayout;
 use craft\models\FieldLayoutTab;
 use craft\models\Section;
 use craft\models\Section_SiteSettings;
+use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Typesense\Client as TypesenseClient;
 use Typesense\Exceptions\ObjectNotFound;
 use webdna\typesensesync\console\Controller;
@@ -27,6 +28,7 @@ use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\NotAFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\RefusingFormatter;
+use webdna\typesensesync\tests\fixtures\MockedClient;
 use webdna\typesensesync\tests\Support\Examples;
 use webdna\typesensesync\tests\Support\TestCollections;
 use webdna\typesensesync\TypesenseSync;
@@ -181,6 +183,32 @@ class ConsoleTest extends Unit
         $this->assertStringContainsString('Could not connect', $run['err']);
         $this->useSettings($this->settings());
         $this->assertNull($this->plugin->collections->getActiveCollectionName('content'));
+    }
+
+    public function testSetupAndApplyRefuseAServerOlderThan30(): void
+    {
+        $original = $this->plugin->client;
+        $old = new MockedClient();
+        $this->plugin->set('client', $old);
+
+        try {
+            // setup asks /debug once, collections/apply once.
+            for ($i = 0; $i < 2; $i++) {
+                $old->handler->append(new GuzzleResponse(200, ['Content-Type' => 'application/json'], '{"state":1,"version":"29.0"}'));
+            }
+
+            foreach (['setup', 'collections/apply'] as $route) {
+                $run = $this->command($route);
+                $this->assertSame(ExitCode::UNSPECIFIED_ERROR, $run['exit'], $route . ' (BR-24, TN-5)');
+                $this->assertStringContainsString('Typesense 29.0 found; version 30.0 or later is required.', $run['err'], $route);
+            }
+
+            $this->assertSame(['GET /debug', 'GET /debug'], array_map(fn(string $r) => strstr($r, ' [', true), $old->requests()), 'nothing asked beyond the version');
+        } finally {
+            $this->plugin->set('client', $original);
+        }
+
+        $this->assertNull($this->plugin->collections->getActiveCollectionName('content'), 'nothing created');
     }
 
     // TS-10 step 1 - Commerce absent (BR-5) -----------------------------------------------------

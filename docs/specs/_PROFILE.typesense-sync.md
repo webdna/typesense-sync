@@ -161,6 +161,10 @@ docker compose run --rm php composer validate --strict --no-plugins
 - **The examples are autoloaded only in dev** (`autoload-dev`: `modules\search\formatters\` →
   `examples/formatters/`). The tests and PHPStan load them, and a site never does. Load an example
   config with `tests/Support/Examples.php`, never a copy in a fixture.
+- **Under the Craft test harness, `Craft::getLogger()` is Codeception's Yii2 `Logger`**, which
+  keeps only its last five lines, as formatted text, and nothing in `->messages`. To assert a log
+  line, swap in a plain `yii\log\Logger(['flushInterval' => 0])` with `Craft::setLogger()` for
+  the call and restore it after (unit `SyncTest::logged()`).
 - **`craftcms/phpstan` does not require PHPStan** — it only suggests it. `phpstan/phpstan` is its
   own dev requirement.
 

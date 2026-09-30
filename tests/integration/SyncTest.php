@@ -243,6 +243,25 @@ class SyncTest extends Unit
         $this->assertSame(5, $this->document($news)['popularity'] ?? null, 'step 1: the counter survived');
     }
 
+    public function testAReindexWritesInBatchesOfTheBatchSize(): void
+    {
+        $this->useSettings($this->settings(sources: [$this->source('news')], values: ['batchSize' => 2]));
+        foreach (range(1, 5) as $n) {
+            $this->saveEntry('news', 'Batch ' . $n);
+        }
+        $this->clearQueue();
+
+        // Progress is reported once per batch written (BR-12).
+        $progress = [];
+        $run = $this->plugin->sync->reindex('content', null, function(int $indexed) use (&$progress) {
+            $progress[] = $indexed;
+        });
+
+        $this->assertSame(5, $run['indexed']);
+        $this->assertSame([2, 4, 5], $progress);
+        $this->assertSame(5, $this->countDocuments());
+    }
+
     public function testAnEmptyRunDoesNotPrune(): void
     {
         $this->indexedEntry('news', 'Survivor');
