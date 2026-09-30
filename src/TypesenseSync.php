@@ -6,6 +6,7 @@ use Craft;
 use craft\base\Model;
 use craft\base\Plugin;
 use webdna\typesensesync\models\Settings;
+use webdna\typesensesync\services\Client;
 
 /**
  * Typesense Sync: keeps declared Craft content in Typesense collections and hands search pages
@@ -18,6 +19,7 @@ use webdna\typesensesync\models\Settings;
  * @since 1.0.0
  *
  * @method Settings getSettings()
+ * @property-read Client $client
  */
 class TypesenseSync extends Plugin
 {
@@ -29,6 +31,18 @@ class TypesenseSync extends Plugin
     public string $schemaVersion = '1.0.0';
 
     public bool $hasCpSettings = true;
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function config(): array
+    {
+        return [
+            'components' => [
+                'client' => Client::class,
+            ],
+        ];
+    }
 
     public function init(): void
     {

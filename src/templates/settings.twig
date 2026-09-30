@@ -87,6 +87,64 @@
   warning: configWarning('collectionPrefix', overrides),
 }) }}
 
+{#
+  Tests what is in the form, saved or not, including the limits below. A failed test never stops
+  a save (AC-1). Messages are written as text, never as HTML.
+#}
+<div class="field">
+  <button type="button" class="btn" data-ts-action="test-connection">{{ 'Test connection'|t('typesense-sync') }}</button>
+  <div class="hidden" data-ts-connection-result role="status" aria-live="polite"></div>
+</div>
+
+{% js %}
+(() => {
+  const button = document.querySelector('[data-ts-action="test-connection"]');
+  const result = document.querySelector('[data-ts-connection-result]');
+  const messages = {{ {
+    connected: 'Connected to Typesense {version}.'|t('typesense-sync'),
+    failed: 'The connection test could not be run.'|t('typesense-sync'),
+  }|json_encode|raw }};
+
+  const show = (data) => {
+    result.replaceChildren();
+    result.className = data.ok ? 'success' : 'error';
+    if (data.ok) {
+      result.textContent = messages.connected.replace('{version}', data.version);
+      return;
+    }
+    const list = document.createElement('ul');
+    list.className = 'bullets';
+    for (const problem of data.problems ?? [messages.failed]) {
+      const item = document.createElement('li');
+      item.textContent = problem;
+      list.append(item);
+    }
+    result.append(list);
+  };
+
+  button.addEventListener('click', async () => {
+    const settings = {};
+    for (const input of button.closest('form').elements) {
+      const match = input.name?.match(/^settings\[(\w+)\]$/);
+      if (match) {
+        settings[match[1]] = input.value;
+      }
+    }
+    button.classList.add('loading');
+    button.disabled = true;
+    try {
+      const {data} = await Craft.sendActionRequest('POST', 'typesense-sync/settings/test-connection', {data: {settings}});
+      show(data);
+    } catch (e) {
+      show({ok: false, problems: [e?.response?.data?.message ?? messages.failed]});
+    } finally {
+      button.classList.remove('loading');
+      button.disabled = false;
+    }
+  });
+})();
+{% endjs %}
+
 <hr>
 
 <h2>{{ 'Limits'|t('typesense-sync') }}</h2>

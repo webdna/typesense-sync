@@ -7,6 +7,7 @@ use Craft;
 use craft\web\View;
 use ReflectionMethod;
 use webdna\typesensesync\models\Settings;
+use webdna\typesensesync\services\Client;
 use webdna\typesensesync\tests\fixtures\formatters\NewsFormatter;
 use webdna\typesensesync\TypesenseSync;
 
@@ -31,6 +32,16 @@ class PluginTest extends Unit
         $this->assertNotNull($plugin);
         $this->assertInstanceOf(Settings::class, $plugin->getSettings());
         $this->assertTrue($plugin->hasCpSettings);
+    }
+
+    public function testClientServiceIsRegistered(): void
+    {
+        $this->assertInstanceOf(Client::class, TypesenseSync::getInstance()?->client);
+    }
+
+    public function testSettingsScreenHasTheTestConnectionButton(): void
+    {
+        $this->assertStringContainsString('data-ts-action="test-connection"', $this->renderSettings([]));
     }
 
     public function testSettingsScreenNeverRendersALiteralAdminKey(): void

@@ -34,6 +34,11 @@ class Settings extends Model
     private const ENV_ATTRIBUTES = ['host', 'port', 'protocol', 'apiKey', 'searchApiKey', 'collectionPrefix'];
 
     /**
+     * What a connection test reads; the settings form may change these before a save.
+     */
+    public const CONNECTION = ['host', 'port', 'protocol', 'apiKey', 'searchApiKey', 'connectTimeout', 'timeout'];
+
+    /**
      * Typesense's own values for field options; a formatter that states one and a formatter that
      * leaves it out declare the same field.
      */
@@ -212,6 +217,38 @@ class Settings extends Model
         $key = $this->getApiKey();
 
         return $key === '' ? '' : '••••' . substr($key, -4);
+    }
+
+    /**
+     * A copy with connection values from a settings form applied: what *Test connection* tests,
+     * before anything is saved.
+     *
+     * A blank admin key keeps the saved one, as a save does; a key named in `$locked` (set in
+     * `config/typesense-sync.php`, which wins over the form) keeps its value; anything that is not
+     * a connection setting is ignored.
+     *
+     * @param array<string, mixed> $posted
+     * @param list<string> $locked
+     */
+    public function withConnection(array $posted, array $locked = []): self
+    {
+        $settings = clone $this;
+
+        foreach (self::CONNECTION as $key) {
+            if (in_array($key, $locked, true) || !is_scalar($posted[$key] ?? null)) {
+                continue;
+            }
+
+            $value = trim((string)$posted[$key]);
+
+            if (in_array($key, ['connectTimeout', 'timeout'], true)) {
+                $settings->$key = ctype_digit($value) ? (int)$value : 0;
+            } elseif ($key !== 'apiKey' || $value !== '') {
+                $settings->$key = $value;
+            }
+        }
+
+        return $settings;
     }
 
     /**
