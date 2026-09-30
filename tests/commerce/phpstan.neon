@@ -1,5 +1,6 @@
 # The Commerce leg's analysis (tests/commerce/run.sh): src/ against Commerce's real classes, plus
-# this leg's tests, which the main analysis excludes because vendor/ has no Commerce.
+# this leg's tests and the product formatter example, which the main analysis excludes because
+# vendor/ has no Commerce.
 includes:
     - ../../vendor-commerce/craftcms/phpstan/phpstan.neon
 
@@ -8,6 +9,8 @@ parameters:
     paths:
         - ../../src
         - .
+        # The one example that needs Commerce, which the main analysis excludes.
+        - ../../examples/formatters/ProductFormatter.php
     excludePaths:
         - run.sh
     # The helper asks whether Commerce can be loaded, which is always true here and is the whole

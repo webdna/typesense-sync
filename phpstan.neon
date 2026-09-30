@@ -6,9 +6,13 @@ parameters:
     paths:
         - src
         - tests
+        - examples/config
+        - examples/formatters
     excludePaths:
         - tests/_craft/storage
         - tests/_output
         - tests/Support
         # Needs Commerce, which vendor/ never has; analysed by tests/commerce/run.sh.
         - tests/commerce
+        # Needs Commerce too; analysed by tests/commerce/run.sh.
+        - examples/formatters/ProductFormatter.php

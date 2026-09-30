@@ -24,6 +24,7 @@ use webdna\typesensesync\jobs\SyncElement;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\services\Collections;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
+use webdna\typesensesync\tests\Support\Examples;
 use webdna\typesensesync\tests\Support\TestCollections;
 use webdna\typesensesync\TypesenseSync;
 
@@ -148,6 +149,44 @@ class ProductsTest extends Unit
             $this->assertNotNull($this->document($product));
         }
         $this->assertNull($this->document($other));
+    }
+
+    /**
+     * `examples/config/products.php` and the example ProductFormatter, against Commerce's real
+     * classes (task 8.1): its type handle renamed to this run's, and nothing else.
+     */
+    public function testTheProductsExampleIndexesPriceSkuAndAvailability(): void
+    {
+        $snippet = Examples::config('products');
+        $this->useSettings(new Settings(Examples::withHandles($snippet, ['clothing' => (string)$this->types['shoes']->handle]) + [
+            'host' => (string)getenv('TYPESENSE_TEST_HOST'),
+            'port' => (string)getenv('TYPESENSE_TEST_PORT'),
+            'protocol' => (string)getenv('TYPESENSE_TEST_PROTOCOL'),
+            'apiKey' => (string)getenv('TYPESENSE_TEST_API_KEY'),
+            'collectionPrefix' => $this->prefix,
+        ]));
+        // The example sorts by priority, which the collection _before() made cannot be altered
+        // to, so it starts from nothing, as a site copying it would.
+        TestCollections::deleteAll($this->admin, $this->prefix);
+        $applied = $this->plugin->collections->apply('products');
+        $this->assertSame(Collections::ACTION_CREATE, $applied['action'], $applied['message']);
+
+        $product = $this->saveProduct('shoes', 'Harbour boot');
+        // The variant saveProduct() sets on the new product is not saved in this harness
+        // (Commerce 5.7: no id, no errors), and the other tests need none. This one does, so it
+        // saves one as a nested element of the product, then saves the product again.
+        $variant = new Variant(['sku' => 'BOOT-' . bin2hex(random_bytes(4)), 'basePrice' => 10, 'ownerId' => $product->id, 'primaryOwnerId' => $product->id]);
+        $this->assertTrue(Craft::$app->getElements()->saveElement($variant), implode(' ', $variant->getFirstErrors()));
+        $product = Product::find()->id($product->id)->status(null)->one();
+        $this->assertInstanceOf(Product::class, $product);
+        $this->save($product);
+        $this->runQueue();
+
+        $document = $this->document($product) ?? [];
+        $this->assertSame('Harbour boot', $document['title'] ?? null);
+        $this->assertEquals(10, $document['price'] ?? null, "the default variant's price");
+        $this->assertSame($variant->getSku(), $document['sku'] ?? null);
+        $this->assertTrue($document['available'] ?? null);
     }
 
     // Helpers -----------------------------------------------------------------------------------

@@ -1,0 +1,64 @@
+{#
+ # Typesense Sync — example search markup for `search.js`. Unsupported: copy it in and make it yours.
+ #
+ # `searchConfig()` returns null when the plugin is not set up or the key cannot be made, and
+ # never throws (BR-20), so the page always renders; the component shows "unavailable".
+ #
+ # The key expires after `ttl` seconds (default 3600). A static or edge cache in front of this page
+ # must not keep it longer than that, or visitors are served a dead key: cache for less than the
+ # TTL, or pass a longer `ttl`.
+ #
+ # `filter` narrows what this page's key can reach, on top of the publication window. It is
+ # embedded in the key, so a visitor cannot remove it, but it is readable, so never put a secret
+ # in it. For example, to search one section only: `filter: 'section:=`News`'`.
+ #}
+{% set searchConfig = craft.typesense.searchConfig('content', {
+    ttl: 3600,
+}) %}
+
+<div
+    x-data="typesenseSearch({ perPage: 10 })"
+    data-typesense-config="{{ searchConfig|json_encode|e('html_attr') }}"
+>
+    <form role="search" x-on:submit.prevent="search()">
+        <label for="site-search">{{ 'Search'|t }}</label>
+        <input
+            id="site-search"
+            type="search"
+            autocomplete="off"
+            x-model="query"
+            x-on:input.debounce.250ms="search()"
+            x-bind:disabled="error === 'unavailable'"
+        >
+    </form>
+
+    <p x-show="error === 'unavailable'" x-cloak>{{ 'Search is unavailable at the moment.'|t }}</p>
+    <p x-show="error === 'expired'" x-cloak>{{ 'This page has been open a while. Reload it to search again.'|t }}</p>
+    <p x-show="error === 'failed'" x-cloak>{{ 'Search did not answer. Please try again.'|t }}</p>
+
+    <div aria-live="polite">
+        <p x-show="!loading && !error && query.trim() !== ''" x-cloak>
+            <span x-text="found"></span> {{ 'results'|t }}
+        </p>
+
+        <ol>
+            <template x-for="hit in hits" x-bind:key="hit.id">
+                <li>
+                    {# URLs are root-relative, so a result links to this environment. #}
+                    <a x-bind:href="hit.url">
+                        {# Typesense escapes the snippet apart from its <mark> tags. #}
+                        <span x-show="hit.highlight" x-html="hit.highlight"></span>
+                        <span x-show="!hit.highlight" x-text="hit.title"></span>
+                    </a>
+                    <p x-show="hit.summary" x-text="hit.summary"></p>
+                </li>
+            </template>
+        </ol>
+
+        <nav x-show="pages > 1" x-cloak aria-label="{{ 'Search results pages'|t }}">
+            <button type="button" x-on:click="search(page - 1)" x-bind:disabled="page <= 1 || loading">{{ 'Previous'|t }}</button>
+            <span x-text="page + ' / ' + pages"></span>
+            <button type="button" x-on:click="search(page + 1)" x-bind:disabled="page >= pages || loading">{{ 'Next'|t }}</button>
+        </nav>
+    </div>
+</div>
