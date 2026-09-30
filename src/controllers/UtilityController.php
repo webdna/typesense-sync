@@ -60,7 +60,7 @@ class UtilityController extends Controller
         );
 
         if (!$element instanceof ElementInterface) {
-            throw new BadRequestHttpException("No element exists with the ID $elementId.");
+            throw new BadRequestHttpException(Craft::t('typesense-sync', 'No element exists with the ID {id}.', ['id' => $elementId]));
         }
 
         $plugin = self::plugin();
@@ -195,7 +195,7 @@ class UtilityController extends Controller
         $handle = (string)$this->request->getRequiredBodyParam('collection');
 
         if (self::plugin()->targets->getSettings()->getCollectionConfig($handle) === null) {
-            throw new BadRequestHttpException("No collection “{$handle}” is declared in config/typesense-sync.php.");
+            throw new BadRequestHttpException(Craft::t('typesense-sync', 'No collection “{collection}” is declared in config/typesense-sync.php.', ['collection' => $handle]));
         }
 
         return $handle;

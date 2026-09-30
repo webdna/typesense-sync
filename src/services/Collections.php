@@ -100,13 +100,12 @@ class Collections extends Component
                 }
 
                 if (isset($fields[$name]) && Settings::comparableField($fields[$name]) !== Settings::comparableField($field)) {
-                    throw new InvalidConfigException(sprintf(
-                        'Collection "%s": formatters %s and %s declare field "%s" differently.',
-                        $collection,
-                        $declaredBy[$name],
-                        $formatter::class,
-                        $name,
-                    ));
+                    throw new InvalidConfigException(Craft::t('typesense-sync', 'Collection "{collection}": formatters {first} and {second} declare field "{field}" differently.', [
+                        'collection' => $collection,
+                        'first' => $declaredBy[$name],
+                        'second' => $formatter::class,
+                        'field' => $name,
+                    ]));
                 }
 
                 $fields[$name] ??= $field;
@@ -174,7 +173,7 @@ class Collections extends Component
         } catch (ObjectNotFound) {
             return null;
         } catch (Throwable $e) {
-            throw $this->failure(sprintf('Could not read alias "%s"', $alias), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not read alias "{alias}"', ['alias' => $alias]), $e);
         }
 
         return is_string($name) && $name !== '' ? $name : null;
@@ -201,7 +200,7 @@ class Collections extends Component
         } catch (ObjectNotFound) {
             return null;
         } catch (Throwable $e) {
-            throw $this->failure(sprintf('Could not read collection "%s"', $name), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not read collection "{name}"', ['name' => $name]), $e);
         }
     }
 
@@ -271,19 +270,18 @@ class Collections extends Component
         $reasons = [];
 
         if ($liveSorting !== $desiredSorting) {
-            $reasons[] = sprintf(
-                'default_sorting_field is "%s" and should be "%s"',
-                $liveSorting === '' ? '(none)' : $liveSorting,
-                $desiredSorting === '' ? '(none)' : $desiredSorting,
-            );
+            $none = Craft::t('typesense-sync', '(none)');
+            $reasons[] = Craft::t('typesense-sync', 'default_sorting_field is "{live}" and should be "{desired}"', [
+                'live' => $liveSorting === '' ? $none : $liveSorting,
+                'desired' => $desiredSorting === '' ? $none : $desiredSorting,
+            ]);
         }
 
         if ($liveNested !== $config->enableNestedFields) {
-            $reasons[] = sprintf(
-                'enable_nested_fields is %s and should be %s',
-                $liveNested ? 'on' : 'off',
-                $config->enableNestedFields ? 'on' : 'off',
-            );
+            $reasons[] = Craft::t('typesense-sync', 'enable_nested_fields is {live} and should be {desired}', [
+                'live' => $liveNested ? Craft::t('typesense-sync', 'on') : Craft::t('typesense-sync', 'off'),
+                'desired' => $config->enableNestedFields ? Craft::t('typesense-sync', 'on') : Craft::t('typesense-sync', 'off'),
+            ]);
         }
 
         return [
@@ -314,10 +312,9 @@ class Collections extends Component
         $alias = $config->getName();
 
         if ($this->getDesiredFields($collection) === []) {
-            return $this->result(self::ACTION_SKIP, null, null, false, sprintf(
-                'Nothing enabled routes into "%s", so it has no fields to create. Declare an enabled source for it first.',
-                $collection,
-            ));
+            return $this->result(self::ACTION_SKIP, null, null, false, Craft::t('typesense-sync', 'Nothing enabled routes into "{collection}", so it has no fields to create. Declare an enabled source for it first.', [
+                'collection' => $collection,
+            ]));
         }
 
         $diff = $this->diff($collection);
@@ -326,13 +323,10 @@ class Collections extends Component
             $existing = $this->listCollectionNames();
 
             if (in_array($alias, $existing, true)) {
-                return $this->result(self::ACTION_BLOCKED, $alias, null, false, sprintf(
-                    'A collection named "%s" already exists and is not an alias, so "%s" cannot be created. '
-                    . 'Delete that collection, or give "%s" another name.',
-                    $alias,
-                    $alias,
-                    $collection,
-                ));
+                return $this->result(self::ACTION_BLOCKED, $alias, null, false, Craft::t('typesense-sync', 'A collection named "{alias}" already exists and is not an alias, so "{alias}" cannot be created. Delete that collection, or give "{collection}" another name.', [
+                    'alias' => $alias,
+                    'collection' => $collection,
+                ]));
             }
 
             $schema = $this->buildSchema($collection, $this->nextVersion($collection, $existing));
@@ -340,41 +334,38 @@ class Collections extends Component
             $count = count($schema['fields']);
 
             if ($dryRun) {
-                return $this->result(self::ACTION_CREATE, $name, $schema, true, sprintf(
-                    'Would create %s (%d fields) and alias %s to it.',
-                    $name,
-                    $count,
-                    $alias,
-                ));
+                return $this->result(self::ACTION_CREATE, $name, $schema, true, Craft::t('typesense-sync', 'Would create {name} ({count} fields) and alias {alias} to it.', [
+                    'name' => $name,
+                    'count' => $count,
+                    'alias' => $alias,
+                ]));
             }
 
             try {
                 $this->client()->collections->create($schema);
                 $this->client()->aliases->upsert($alias, ['collection_name' => $name]);
             } catch (Throwable $e) {
-                throw $this->failure(sprintf('Could not create "%s"', $name), $e);
+                throw $this->failure(Craft::t('typesense-sync', 'Could not create "{name}"', ['name' => $name]), $e);
             }
 
-            return $this->result(self::ACTION_CREATE, $name, $schema, true, sprintf(
-                'Created %s (%d fields), aliased as %s. It is empty until a sync fills it.',
-                $name,
-                $count,
-                $alias,
-            ));
+            return $this->result(self::ACTION_CREATE, $name, $schema, true, Craft::t('typesense-sync', 'Created {name} ({count} fields), aliased as {alias}. It is empty until a sync fills it.', [
+                'name' => $name,
+                'count' => $count,
+                'alias' => $alias,
+            ]));
         }
 
         $name = (string)$diff['collection'];
 
         if ($diff['needsRecreate']) {
-            return $this->result(self::ACTION_NEEDS_RECREATE, $name, null, false, sprintf(
-                '%s cannot be altered to match: %s. Recreate the collection instead.',
-                $name,
-                implode('; ', $diff['recreateReasons']),
-            ));
+            return $this->result(self::ACTION_NEEDS_RECREATE, $name, null, false, Craft::t('typesense-sync', '{name} cannot be altered to match: {reasons}. Recreate the collection instead.', [
+                'name' => $name,
+                'reasons' => implode('; ', $diff['recreateReasons']),
+            ]));
         }
 
         if ($diff['upToDate']) {
-            return $this->result(self::ACTION_NONE, $name, null, false, sprintf('%s is up to date.', $name));
+            return $this->result(self::ACTION_NONE, $name, null, false, Craft::t('typesense-sync', '{name} is up to date.', ['name' => $name]));
         }
 
         $desired = [];
@@ -398,19 +389,19 @@ class Collections extends Component
         $payload = ['fields' => $fields];
         $reindex = $diff['added'] !== [] || $changed !== [];
         $summary = sprintf('+%d, -%d, ~%d', count($diff['added']), count($diff['dropped']), count($changed));
-        $advice = $reindex ? ' Reindex it so existing documents carry the new fields.' : '';
+        $advice = $reindex ? ' ' . Craft::t('typesense-sync', 'Reindex it so existing documents carry the new fields.') : '';
 
         if ($dryRun) {
-            return $this->result(self::ACTION_ALTER, $name, $payload, $reindex, sprintf('Would alter %s: %s.%s', $name, $summary, $advice));
+            return $this->result(self::ACTION_ALTER, $name, $payload, $reindex, Craft::t('typesense-sync', 'Would alter {name}: {summary}.', ['name' => $name, 'summary' => $summary]) . $advice);
         }
 
         try {
             $this->client()->collections[$name]->update($payload);
         } catch (Throwable $e) {
-            throw $this->failure(sprintf('Could not alter "%s"', $name), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not alter "{name}"', ['name' => $name]), $e);
         }
 
-        return $this->result(self::ACTION_ALTER, $name, $payload, $reindex, sprintf('Altered %s: %s.%s', $name, $summary, $advice));
+        return $this->result(self::ACTION_ALTER, $name, $payload, $reindex, Craft::t('typesense-sync', 'Altered {name}: {summary}.', ['name' => $name, 'summary' => $summary]) . $advice);
     }
 
     /**
@@ -441,10 +432,9 @@ class Collections extends Component
         $problems = $this->settings()->getProblems();
 
         if ($problems !== []) {
-            throw new InvalidConfigException(sprintf(
-                'Nothing was recreated: the config has problems. %s',
-                implode(' ', $problems),
-            ));
+            throw new InvalidConfigException(Craft::t('typesense-sync', 'Nothing was recreated: the config has problems. {problems}', [
+                'problems' => implode(' ', $problems),
+            ]));
         }
 
         $plan = [$collection, ...$this->getDependants($collection)];
@@ -454,7 +444,7 @@ class Collections extends Component
         try {
             foreach ($plan as $handle) {
                 if (!$mutex->acquire($this->lockName($handle))) {
-                    throw new SyncException(sprintf('Nothing was recreated: "%s" is already being recreated.', $handle));
+                    throw new SyncException(Craft::t('typesense-sync', 'Nothing was recreated: "{collection}" is already being recreated.', ['collection' => $handle]));
                 }
 
                 $locked[] = $handle;
@@ -521,10 +511,9 @@ class Collections extends Component
             ));
 
             if ($ready === []) {
-                throw new InvalidConfigException(sprintf(
-                    'Collections reference each other in a cycle (%s), so no recreate order exists.',
-                    implode(', ', $left),
-                ));
+                throw new InvalidConfigException(Craft::t('typesense-sync', 'Collections reference each other in a cycle ({collections}), so no recreate order exists.', [
+                    'collections' => implode(', ', $left),
+                ]));
             }
 
             array_push($order, ...$ready);
@@ -564,11 +553,10 @@ class Collections extends Component
             }
 
             if ($builds !== []) {
-                $e = $this->failure(sprintf(
-                    'Nothing was recreated; %s built for this run %s deleted',
-                    implode(', ', array_column($builds, 'to')),
-                    count($builds) === 1 ? 'was' : 'were',
-                ), $e);
+                $e = $this->failure(Craft::t('typesense-sync', 'Nothing was recreated; {names} built for this run {n, plural, =1{was} other{were}} deleted', [
+                    'names' => implode(', ', array_column($builds, 'to')),
+                    'n' => count($builds),
+                ]), $e);
             }
 
             throw $e;
@@ -580,13 +568,12 @@ class Collections extends Component
             try {
                 $this->client()->aliases->upsert($build['alias'], ['collection_name' => $build['to']]);
             } catch (Throwable $e) {
-                throw $this->failure(sprintf(
-                    'Could not point %s at %s; the aliases before it were swapped (%s). Recreate "%s" again',
-                    $build['alias'],
-                    $build['to'],
-                    implode(', ', array_column(array_slice($builds, 0, (int)array_search($build, $builds, true)), 'alias')) ?: 'none',
-                    $plan[0],
-                ), $e);
+                throw $this->failure(Craft::t('typesense-sync', 'Could not point {alias} at {name}; the aliases before it were swapped ({swapped}). Recreate "{collection}" again', [
+                    'alias' => $build['alias'],
+                    'name' => $build['to'],
+                    'swapped' => implode(', ', array_column(array_slice($builds, 0, (int)array_search($build, $builds, true)), 'alias')) ?: Craft::t('typesense-sync', 'none'),
+                    'collection' => $plan[0],
+                ]), $e);
             }
         }
 
@@ -628,14 +615,14 @@ class Collections extends Component
         $alias = $this->config($collection)->getName();
 
         if ($this->getDesiredFields($collection) === []) {
-            throw new SyncException(sprintf('Nothing enabled routes into "%s", so there is nothing to recreate it from.', $collection));
+            throw new SyncException(Craft::t('typesense-sync', 'Nothing enabled routes into "{collection}", so there is nothing to recreate it from.', ['collection' => $collection]));
         }
 
         $previous = $this->getActiveCollectionName($collection);
         $existing = $this->listCollectionNames();
 
         if ($previous === null && in_array($alias, $existing, true)) {
-            throw new SyncException(sprintf('A collection named "%s" already exists and is not an alias, so "%s" cannot be recreated behind it.', $alias, $collection));
+            throw new SyncException(Craft::t('typesense-sync', 'A collection named "{alias}" already exists and is not an alias, so "{collection}" cannot be recreated behind it.', ['alias' => $alias, 'collection' => $collection]));
         }
 
         $liveDocuments = $previous !== null ? $this->documentCount($previous) : 0;
@@ -657,7 +644,7 @@ class Collections extends Component
         try {
             $this->client()->collections->create($schema);
         } catch (Throwable $e) {
-            throw $this->failure(sprintf('Could not create "%s"', $name), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not create "{name}"', ['name' => $name]), $e);
         }
 
         try {
@@ -666,17 +653,17 @@ class Collections extends Component
             });
 
             if ($run['failed'] > 0) {
-                throw new SyncException(sprintf('%d documents could not be written to %s', $run['failed'], $name));
+                throw new SyncException(Craft::t('typesense-sync', '{count} documents could not be written to {name}', ['count' => $run['failed'], 'name' => $name]));
             }
 
             // The same guard as a prune on an empty run: a broken query must not empty search.
             if ($run['ids'] === [] && $liveDocuments > 0) {
-                throw new SyncException(sprintf('the build made no documents, while %s holds %d', $previous, $liveDocuments));
+                throw new SyncException(Craft::t('typesense-sync', 'the build made no documents, while {name} holds {count}', ['name' => $previous, 'count' => $liveDocuments]));
             }
         } catch (Throwable $e) {
             $this->deleteQuietly($name);
 
-            throw $this->failure(sprintf('Could not build "%s"; %s was deleted and %s still serves %s', $collection, $name, $alias, $previous ?? 'nothing'), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not build "{collection}"; {name} was deleted and {alias} still serves {previous}', ['collection' => $collection, 'name' => $name, 'alias' => $alias, 'previous' => $previous ?? Craft::t('typesense-sync', 'nothing')]), $e);
         }
 
         return [
@@ -803,7 +790,7 @@ class Collections extends Component
         } catch (ObjectNotFound) {
             return 0;
         } catch (Throwable $e) {
-            throw $this->failure(sprintf('Could not read collection "%s"', $name), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not read collection "{name}"', ['name' => $name]), $e);
         }
     }
 
@@ -936,7 +923,7 @@ class Collections extends Component
     private function config(string $collection): CollectionConfig
     {
         return $this->settings()->getCollectionConfig($collection)
-            ?? throw new InvalidConfigException(sprintf('No collection "%s" is declared in config/typesense-sync.php.', $collection));
+            ?? throw new InvalidConfigException(Craft::t('typesense-sync', 'No collection "{collection}" is declared in config/typesense-sync.php.', ['collection' => $collection]));
     }
 
     /**
@@ -945,7 +932,7 @@ class Collections extends Component
     private function client(): TypesenseClient
     {
         return TypesenseSync::getInstance()->client->getClient()
-            ?? throw new SyncException('Typesense is not configured: set a host and an admin API key.');
+            ?? throw new SyncException(Craft::t('typesense-sync', 'Typesense is not configured: set a host and an admin API key.'));
     }
 
     private function failure(string $what, Throwable $e): SyncException

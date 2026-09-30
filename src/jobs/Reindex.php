@@ -35,7 +35,7 @@ class Reindex extends BaseJob
         $sync = TypesenseSync::getInstance()->sync;
 
         if (TypesenseSync::getInstance()->targets->getSettings()->getCollectionConfig($this->collection) === null) {
-            throw new SyncException(sprintf('No collection "%s" is declared in config/typesense-sync.php.', $this->collection));
+            throw new SyncException(Craft::t('typesense-sync', 'No collection "{collection}" is declared in config/typesense-sync.php.', ['collection' => (string)$this->collection]));
         }
 
         $progress = function(int $indexed) use ($queue): void {
@@ -57,7 +57,7 @@ class Reindex extends BaseJob
         ), TypesenseSync::HANDLE);
 
         if ($run['failed'] > 0) {
-            throw new SyncException(sprintf('%d documents of "%s" could not be written; see the typesense-sync log.', $run['failed'], $this->collection));
+            throw new SyncException(Craft::t('typesense-sync', '{count} documents of "{collection}" could not be written; see the typesense-sync log.', ['count' => $run['failed'], 'collection' => (string)$this->collection]));
         }
     }
 

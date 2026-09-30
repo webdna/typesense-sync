@@ -273,7 +273,7 @@ class Sync extends Component
         } catch (ObjectNotFound) {
             // Never indexed, or already removed: the outcome wanted.
         } catch (Throwable $e) {
-            throw $this->failure(sprintf('Could not delete document %s from "%s"', $documentId, $name), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not delete document {id} from "{name}"', ['id' => $documentId, 'name' => $name]), $e);
         }
 
         if ($this->hasEventHandlers(self::EVENT_AFTER_DELETE_DOCUMENT)) {
@@ -313,7 +313,7 @@ class Sync extends Component
         try {
             $results = $this->client()->collections[$name]->documents->import($documents, ['action' => 'upsert']);
         } catch (Throwable $e) {
-            throw $this->failure(sprintf('Could not import %s into "%s"', $this->describeIds($documents), $name), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not import {documents} into "{name}"', ['documents' => $this->describeIds($documents), 'name' => $name]), $e);
         }
 
         // import() reports each document's failure in its result rather than throwing, so a
@@ -365,7 +365,7 @@ class Sync extends Component
             } catch (ObjectNotFound) {
                 return [];
             } catch (Throwable $e) {
-                throw $this->failure(sprintf('Could not read the counter fields of "%s"', $collectionName), $e);
+                throw $this->failure(Craft::t('typesense-sync', 'Could not read the counter fields of "{name}"', ['name' => $collectionName]), $e);
             }
 
             foreach (self::jsonLines($export) as $document) {
@@ -543,7 +543,7 @@ class Sync extends Component
             // `truncate` (Typesense 28+) empties the collection without a filter to match.
             $result = $this->client()->collections[$name]->documents->delete(['truncate' => 'true']);
         } catch (Throwable $e) {
-            throw $this->failure(sprintf('Could not flush "%s"', $name), $e);
+            throw $this->failure(Craft::t('typesense-sync', 'Could not flush "{name}"', ['name' => $name]), $e);
         }
 
         $deleted = (int)($result['num_deleted'] ?? 0);
@@ -701,12 +701,11 @@ class Sync extends Component
         try {
             $existing = $this->fetchCounters($alias, $ids, $fields);
         } catch (SyncException $e) {
-            throw new SyncException(sprintf(
-                'Did not write %s to "%s": its counter fields could not be read, and writing would reset them. %s',
-                $this->describeIds($documents),
-                $alias,
-                $e->getMessage(),
-            ), 0, $e);
+            throw new SyncException(Craft::t('typesense-sync', 'Did not write {documents} to "{name}": its counter fields could not be read, and writing would reset them. {error}', [
+                'documents' => $this->describeIds($documents),
+                'name' => $alias,
+                'error' => $e->getMessage(),
+            ]), 0, $e);
         }
 
         foreach ($documents as $index => $document) {
@@ -756,7 +755,7 @@ class Sync extends Component
     private function client(): TypesenseClient
     {
         return TypesenseSync::getInstance()->client->getClient()
-            ?? throw new SyncException('Typesense is not configured: set a host and an admin API key.');
+            ?? throw new SyncException(Craft::t('typesense-sync', 'Typesense is not configured: set a host and an admin API key.'));
     }
 
     /**
@@ -765,7 +764,7 @@ class Sync extends Component
     private function collectionName(string $collection): string
     {
         $config = $this->settings()->getCollectionConfig($collection)
-            ?? throw new SyncException(sprintf('No collection "%s" is declared in config/typesense-sync.php.', $collection));
+            ?? throw new SyncException(Craft::t('typesense-sync', 'No collection "{collection}" is declared in config/typesense-sync.php.', ['collection' => $collection]));
 
         try {
             return $config->getName();

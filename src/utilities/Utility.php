@@ -51,7 +51,8 @@ class Utility extends BaseUtility
      * What the utility shows, as data. Public so it can be tested without rendering.
      *
      * `state` is one of `unconfigured` (no host or admin key), `unreachable` (the server did not
-     * answer, or is older than 30.0), `empty` (connected, nothing declared) or `ready`.
+     * answer, or is older than 30.0), `empty` (connected, nothing declared) or `ready`. Once
+     * `ready`, `analytics` holds each declared rule's state, or null while analytics is off.
      *
      * @return array<string, mixed>
      */
@@ -68,6 +69,7 @@ class Utility extends BaseUtility
             'problems' => $settings->getProblems(),
             'warnings' => $settings->getWarnings(),
             'collections' => [],
+            'analytics' => null,
         ];
 
         if (!$settings->isConfigured()) {
@@ -93,7 +95,35 @@ class Utility extends BaseUtility
             $variables['collections'][] = self::describeCollection($handle);
         }
 
+        $variables['analytics'] = self::describeAnalytics();
+
         return $variables;
+    }
+
+    /**
+     * Each declared analytics rule against the server, or null while analytics is off or nothing
+     * is declared. Read-only: rules are applied from the console (`analytics/apply`), where the
+     * events key they may need is also made.
+     *
+     * @return array{rules: list<array<string, mixed>>, unmanaged: string[], error: string|null}|null
+     */
+    private static function describeAnalytics(): ?array
+    {
+        $plugin = TypesenseSync::getInstance();
+        assert($plugin !== null);
+
+        if (!$plugin->analytics->isEnabled()) {
+            return null;
+        }
+
+        try {
+            $diff = $plugin->analytics->diff();
+
+            return ['rules' => array_values($diff['rules']), 'unmanaged' => $diff['unmanaged'], 'error' => null];
+        } catch (Throwable $e) {
+            // A server without analytics switched on refuses the read; say so on the page.
+            return ['rules' => [], 'unmanaged' => [], 'error' => $e->getMessage()];
+        }
     }
 
     /**
