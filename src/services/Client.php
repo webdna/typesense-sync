@@ -155,6 +155,28 @@ class Client extends Component
     }
 
     /**
+     * Why the saved server cannot be worked on right now — not configured, unreachable, a key
+     * refused, or older than 30.0 (BR-24) — or null when it can. One attempt, bounded by the
+     * timeouts, so a CP action refuses quickly rather than failing half way through its work.
+     */
+    public function serverProblem(): ?string
+    {
+        $settings = $this->settings();
+
+        if (!$settings->isConfigured()) {
+            return Craft::t('typesense-sync', 'Typesense Sync is not connected. Enter the server details in its settings.');
+        }
+
+        try {
+            $debug = $this->createClient($settings, 0)->getDebug()->retrieve();
+        } catch (Throwable $e) {
+            return $this->describeFailure($e, $settings, 'admin API key');
+        }
+
+        return self::versionProblem((string)($debug['version'] ?? ''));
+    }
+
+    /**
      * Why a server of this version cannot be used, or null when it can (BR-24). A version that
      * does not start with a number (a nightly build) cannot be shown to be 30.0 or later, so it
      * is refused too.
@@ -273,6 +295,7 @@ class Client extends Component
         $plugin = TypesenseSync::getInstance();
         assert($plugin !== null);
 
-        return $plugin->getSettings();
+        // Through targets, as every other service, so settings a test injects reach here too.
+        return $plugin->targets->getSettings();
     }
 }
