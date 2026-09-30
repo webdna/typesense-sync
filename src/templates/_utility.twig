@@ -1,0 +1,186 @@
+{#
+  Utilities → Typesense Sync.
+
+  Everything is read live (utilities/Utility::variables()). Each action is its own POST form with
+  a CSRF token; the controller checks the permission again and refuses a recreate whose typed
+  handle does not match (BR-22, BR-23). No key is rendered here (BR-17).
+
+  Test hooks (spec §7): data-collection="<handle>" on each collection row, data-ts-action="<action>"
+  on each button.
+#}
+{% import '_includes/forms.twig' as forms %}
+
+{% set settingsUrl = cpUrl('settings/plugins/typesense-sync') %}
+{% set redirect = 'utilities/typesense-sync' %}
+
+{% if state == 'unconfigured' %}
+  <p>
+    {{ 'Typesense Sync is not connected.'|t('typesense-sync') }}
+    <a href="{{ settingsUrl }}">{{ 'Enter the server details in its settings.'|t('typesense-sync') }}</a>
+  </p>
+{% else %}
+
+  <div class="pane" data-ts-section="connection">
+    <h2>{{ 'Connection'|t('typesense-sync') }}</h2>
+    {% if version is not null %}
+      <p>{{ 'Typesense {version}'|t('typesense-sync', {version: version}) }}</p>
+    {% endif %}
+    {% if connectionProblems %}
+      <ul class="errors">
+        {% for problem in connectionProblems %}
+          <li>{{ problem }}</li>
+        {% endfor %}
+      </ul>
+      <p><a href="{{ settingsUrl }}">{{ 'Check the connection settings'|t('typesense-sync') }}</a></p>
+    {% else %}
+      <p class="success">{{ 'Connected'|t('typesense-sync') }}</p>
+    {% endif %}
+  </div>
+
+  {% if problems %}
+    <div class="pane" data-ts-section="problems">
+      <h2>{{ 'Configuration problems'|t('typesense-sync') }}</h2>
+      <p class="light">{{ 'In config/typesense-sync.php. Recreate is refused until they are fixed.'|t('typesense-sync') }}</p>
+      <ul class="errors">
+        {% for problem in problems %}
+          <li>{{ problem }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {% if warnings %}
+    <div class="pane" data-ts-section="warnings">
+      <h2>{{ 'Warnings'|t('typesense-sync') }}</h2>
+      <ul>
+        {% for warning in warnings %}
+          <li class="warning">{{ warning }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  {% if state == 'empty' %}
+    <p>
+      {{ 'No collections declared.'|t('typesense-sync') }}
+      {{ 'Copy an example from the plugin’s examples/config folder to config/typesense-sync.php to start.'|t('typesense-sync') }}
+    </p>
+  {% endif %}
+
+  {% for row in collections %}
+    {% set diff = row.diff %}
+    <div class="pane" data-collection="{{ row.handle }}">
+      <h2>{{ row.handle }}</h2>
+      <p class="light"><code>{{ row.alias }}</code></p>
+
+      {% if row.error %}
+        <p class="error">{{ row.error }}</p>
+      {% endif %}
+
+      {% if diff %}
+        <table class="data fullwidth">
+          <tbody>
+            <tr>
+              <th scope="row">{{ 'Live version'|t('typesense-sync') }}</th>
+              <td>
+                {% if diff.exists %}
+                  <code>{{ row.alias }}</code> → <code>{{ diff.collection }}</code>
+                {% else %}
+                  <span class="warning">{{ 'Not created yet'|t('typesense-sync') }}</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% if diff.exists %}
+              <tr>
+                <th scope="row">{{ 'Documents'|t('typesense-sync') }}</th>
+                <td>{{ diff.documents|number }}</td>
+              </tr>
+            {% endif %}
+            <tr>
+              <th scope="row">{{ 'Schema'|t('typesense-sync') }}</th>
+              <td data-ts-schema="{{ diff.upToDate ? 'up-to-date' : (diff.needsRecreate ? 'needs-recreate' : 'out-of-date') }}">
+                {% if not row.fieldCount %}
+                  <span class="warning">{{ 'Nothing enabled is declared to feed this collection.'|t('typesense-sync') }}</span>
+                {% elseif diff.upToDate %}
+                  <span class="success">{{ 'Up to date ({count} fields)'|t('typesense-sync', {count: row.fieldCount}) }}</span>
+                {% elseif diff.exists %}
+                  <span class="warning">{{ 'Out of date'|t('typesense-sync') }}</span>
+                  <ul>
+                    {% for field in diff.added %}
+                      <li>{{ 'Add {field}'|t('typesense-sync', {field: field}) }}</li>
+                    {% endfor %}
+                    {% for field in diff.dropped %}
+                      <li>{{ 'Drop {field}'|t('typesense-sync', {field: field}) }}</li>
+                    {% endfor %}
+                    {% for field in diff.changed|keys %}
+                      <li>{{ 'Change {field}'|t('typesense-sync', {field: field}) }}</li>
+                    {% endfor %}
+                    {% for reason in diff.recreateReasons %}
+                      <li>{{ reason }}</li>
+                    {% endfor %}
+                  </ul>
+                  {% if diff.needsRecreate %}
+                    <p class="light">{{ 'This difference cannot be applied in place. Recreate the collection.'|t('typesense-sync') }}</p>
+                  {% endif %}
+                {% else %}
+                  {{ '{count} fields to create'|t('typesense-sync', {count: row.fieldCount}) }}
+                {% endif %}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="flex flex-wrap" style="margin-top: var(--m, 1rem); align-items: flex-start;">
+          {% if row.fieldCount and not diff.upToDate and not diff.needsRecreate %}
+            <form method="post" accept-charset="UTF-8">
+              {{ csrfInput() }}
+              {{ actionInput('typesense-sync/utility/apply') }}
+              {{ redirectInput(redirect) }}
+              {{ hiddenInput('collection', row.handle) }}
+              <button type="submit" class="btn submit" data-ts-action="apply">
+                {{ diff.exists ? 'Apply changes'|t('typesense-sync') : 'Create collection'|t('typesense-sync') }}
+              </button>
+            </form>
+          {% endif %}
+
+          {% if diff.exists %}
+            <form method="post" accept-charset="UTF-8">
+              {{ csrfInput() }}
+              {{ actionInput('typesense-sync/utility/reindex') }}
+              {{ redirectInput(redirect) }}
+              {{ hiddenInput('collection', row.handle) }}
+              <button type="submit" class="btn" data-ts-action="reindex">{{ 'Reindex'|t('typesense-sync') }}</button>
+              {{ forms.checkbox({
+                label: 'Then remove documents no element builds'|t('typesense-sync'),
+                name: 'prune',
+                value: '1',
+                id: 'prune-' ~ row.handle,
+              }) }}
+            </form>
+          {% endif %}
+        </div>
+
+        {% if diff.exists and row.fieldCount %}
+          <form method="post" accept-charset="UTF-8" style="margin-top: 1rem;">
+            {{ csrfInput() }}
+            {{ actionInput('typesense-sync/utility/recreate') }}
+            {{ redirectInput(redirect) }}
+            {{ hiddenInput('collection', row.handle) }}
+            {{ forms.textField({
+              label: 'Recreate'|t('typesense-sync'),
+              instructions: (row.dependants
+                ? 'Builds a new version beside the live one and switches search to it when complete. Also rebuilds, in order: {dependants}. Type {handle} to confirm.'|t('typesense-sync', {dependants: row.dependants|join(', '), handle: row.handle})
+                : 'Builds a new version beside the live one and switches search to it when complete. Type {handle} to confirm.'|t('typesense-sync', {handle: row.handle})),
+              id: 'confirm-' ~ row.handle,
+              name: 'confirm',
+              autocomplete: false,
+              code: true,
+            }) }}
+            <button type="submit" class="btn caution" data-ts-action="recreate">{{ 'Recreate'|t('typesense-sync') }}</button>
+          </form>
+        {% endif %}
+      {% endif %}
+    </div>
+  {% endfor %}
+
+{% endif %}

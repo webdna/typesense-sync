@@ -9,6 +9,7 @@ use GuzzleHttp\Psr7\Response;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\services\Client;
 use webdna\typesensesync\tests\fixtures\MockedClient;
+use webdna\typesensesync\TypesenseSync;
 
 /**
  * The client service with HTTP mocked: bounded timeouts, the version gate (BR-24), the
@@ -140,6 +141,32 @@ class ClientTest extends Unit
         $this->assertCount(1, $service->history, 'The test makes one attempt, never the configured retries');
     }
 
+    // Before a CP action (BR-24) ---------------------------------------------------------------
+
+    public function testServerProblemIsNullForAReachableCurrentServer(): void
+    {
+        $service = $this->withSavedSettings(new MockedClient([$this->json(['version' => '30.2'])]), $this->settings());
+
+        $this->assertNull($service->serverProblem());
+        $this->assertSame(['GET /debug [' . self::ADMIN_KEY . ']'], $service->requests(), 'one request, and no search-key probe');
+    }
+
+    public function testServerProblemNamesAnOldVersionAnUnreachableServerAndNoSettings(): void
+    {
+        $old = $this->withSavedSettings(new MockedClient([$this->json(['version' => '29.1'])]), $this->settings());
+        $this->assertSame('Typesense 29.1 found; version 30.0 or later is required.', $old->serverProblem());
+
+        $down = $this->withSavedSettings(new MockedClient([
+            new ConnectException('Connection refused', new Request('GET', 'http://ts.test:8108/debug')),
+        ]), $this->settings());
+        $this->assertStringStartsWith('Could not reach http://ts.test:8108: ', (string)$down->serverProblem());
+        $this->assertCount(1, $down->history, 'one attempt');
+
+        $none = $this->withSavedSettings(new MockedClient(), new Settings());
+        $this->assertStringContainsString('not connected', (string)$none->serverProblem());
+        $this->assertSame([], $none->history);
+    }
+
     // Search-only key (BR-19) -----------------------------------------------------------------
 
     public function testTheAdminKeyInTheSearchFieldIsRefusedWithoutAProbe(): void
@@ -242,6 +269,18 @@ class ClientTest extends Unit
     }
 
     // Helpers ---------------------------------------------------------------------------------
+
+    protected function _after(): void
+    {
+        TypesenseSync::getInstance()->targets->setSettings(null);
+    }
+
+    private function withSavedSettings(MockedClient $service, Settings $settings): MockedClient
+    {
+        TypesenseSync::getInstance()->targets->setSettings($settings);
+
+        return $service;
+    }
 
     /**
      * @param list<array<string, mixed>> $keys

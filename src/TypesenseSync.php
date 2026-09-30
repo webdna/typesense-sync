@@ -7,14 +7,20 @@ use craft\base\Element;
 use craft\base\ElementInterface;
 use craft\base\Model;
 use craft\base\Plugin;
+use craft\events\DefineMenuItemsEvent;
+use craft\events\RegisterComponentTypesEvent;
+use craft\events\RegisterElementActionsEvent;
+use craft\services\Utilities;
 use craft\web\twig\variables\CraftVariable;
 use Throwable;
+use webdna\typesensesync\elements\actions\Sync as SyncAction;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\services\Client;
 use webdna\typesensesync\services\Collections;
 use webdna\typesensesync\services\Search;
 use webdna\typesensesync\services\Sync;
 use webdna\typesensesync\services\Targets;
+use webdna\typesensesync\utilities\Utility;
 use webdna\typesensesync\variables\TypesenseVariable;
 use yii\base\Event;
 
@@ -72,6 +78,10 @@ class TypesenseSync extends Plugin
             /** @var CraftVariable $variable */
             $variable = $event->sender;
             $variable->set('typesense', TypesenseVariable::class);
+        });
+
+        Event::on(Utilities::class, Utilities::EVENT_REGISTER_UTILITIES, function(RegisterComponentTypesEvent $event): void {
+            $event->types[] = Utility::class;
         });
 
         // Once every plugin has loaded, so their EVENT_REGISTER_ELEMENT_TYPES handlers count.
@@ -145,7 +155,68 @@ class TypesenseSync extends Plugin
             Event::on($type, Element::EVENT_AFTER_DELETE, fn(Event $event) => $queue('delete', $event));
             // Soft-deleted elements come back, and so must their documents.
             Event::on($type, Element::EVENT_AFTER_RESTORE, fn(Event $event) => $queue('sync', $event));
+
+            Event::on($type, Element::EVENT_REGISTER_ACTIONS, function(RegisterElementActionsEvent $event): void {
+                if (self::canSync()) {
+                    $event->actions[] = SyncAction::class;
+                }
+            });
+            Event::on($type, Element::EVENT_DEFINE_ACTION_MENU_ITEMS, function(DefineMenuItemsEvent $event): void {
+                $element = $event->sender;
+
+                if ($element instanceof ElementInterface && ($item = $this->syncMenuItem($element)) !== null) {
+                    $event->items[] = $item;
+                }
+            });
         }
+    }
+
+    /**
+     * The edit screen's "Sync to Typesense" item, or null where it would do nothing: for someone
+     * without the permission (BR-22), for an element no declared source routes anywhere, or for
+     * an element never published. A provisional draft syncs its canonical element, which is what
+     * is in search. Never throws; the edit screen must render.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function syncMenuItem(ElementInterface $element): ?array
+    {
+        try {
+            if (!self::canSync() || $element->getIsUnpublishedDraft() || $element->getCanonicalId() === null) {
+                return null;
+            }
+
+            $canonical = $element->getCanonical();
+
+            if (!$this->targets->shouldQueue($canonical)) {
+                return null;
+            }
+
+            $params = ['elementId' => $canonical->id, 'siteId' => $canonical->siteId];
+
+            if (($url = $canonical->getCpEditUrl()) !== null) {
+                $params['redirect'] = Craft::$app->getSecurity()->hashData($url);
+            }
+
+            return [
+                'label' => Craft::t('typesense-sync', 'Sync to Typesense'),
+                'icon' => 'magnifying-glass',
+                'action' => 'typesense-sync/utility/sync-element',
+                'params' => $params,
+                'attributes' => ['data-ts-action' => 'sync-element'],
+            ];
+        } catch (Throwable $e) {
+            Craft::error(sprintf('Could not build the Typesense menu item for element %s: %s', $element->id, $e->getMessage()), self::HANDLE);
+
+            return null;
+        }
+    }
+
+    private static function canSync(): bool
+    {
+        $user = Craft::$app->getUser();
+
+        return !$user->getIsGuest() && $user->checkPermission(Utility::PERMISSION);
     }
 
     /**
