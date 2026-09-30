@@ -527,6 +527,30 @@ class Sync extends Component
     }
 
     /**
+     * Delete every document in a collection, leaving the collection, its schema and its alias in
+     * place. Callers confirm first; the console asks for the handle to be typed (BR-22).
+     *
+     * @return int Documents deleted.
+     * @throws SyncException when Typesense cannot be reached or refuses the request.
+     */
+    public function flush(string $collection): int
+    {
+        $name = $this->collectionName($collection);
+
+        try {
+            // `truncate` (Typesense 28+) empties the collection without a filter to match.
+            $result = $this->client()->collections[$name]->documents->delete(['truncate' => 'true']);
+        } catch (Throwable $e) {
+            throw $this->failure(sprintf('Could not flush "%s"', $name), $e);
+        }
+
+        $deleted = (int)($result['num_deleted'] ?? 0);
+        Craft::info(sprintf('Flushed "%s": %d documents deleted.', $name, $deleted), TypesenseSync::HANDLE);
+
+        return $deleted;
+    }
+
+    /**
      * The ids in a JSONL export that are not in `$keep`.
      *
      * @param array<int|string> $keep
