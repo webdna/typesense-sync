@@ -545,7 +545,11 @@ fill a new collection. And the collection's schema comes from its sources' forma
 `webdna\typesensesync\events\DefineScopedKeyEvent`: `collection` (`CollectionConfig`), `params` (the
 caller's), `now`, `filters` and `excludeFields`. Raised before each key is signed. Add to
 `filters` and `excludeFields` to narrow the key. A handler cannot remove the publication window or
-the collection's excluded fields, because those are applied on top.
+the collection's excluded fields, because those are applied on top. **Cancellable:** set
+`$event->isValid = false` to refuse the key. None is made, and `scopedKey()` and `searchConfig()`
+return null, so the page shows search as unavailable. Refuse when a filter the key must carry
+cannot be built, for example when the collection a join names is not there, rather than let a
+wider key through.
 
 ```php
 use webdna\typesensesync\events\DefineScopedKeyEvent;

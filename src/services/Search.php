@@ -142,8 +142,8 @@ class Search extends Component
 
     /**
      * The parameters a scoped key for the collection embeds (BR-18), or null when no key could be
-     * made for it: the plugin is unconfigured, the collection is not declared, or there is no
-     * usable search-only key.
+     * made for it: the plugin is unconfigured, the collection is not declared, there is no
+     * usable search-only key, or an EVENT_DEFINE_SCOPED_KEY handler refused it.
      *
      * `filter_by` ANDs the collection's publication window (unless its config turns it off), the
      * caller's filter and every filter added by EVENT_DEFINE_SCOPED_KEY, each in parentheses so an
@@ -171,6 +171,12 @@ class Search extends Component
 
         if ($this->hasEventHandlers(self::EVENT_DEFINE_SCOPED_KEY)) {
             $this->trigger(self::EVENT_DEFINE_SCOPED_KEY, $event);
+        }
+
+        if (!$event->isValid) {
+            Craft::info(sprintf('A handler refused a scoped key for "%s"; none was made.', $handle), TypesenseSync::HANDLE);
+
+            return null;
         }
 
         $filters = array_merge(
