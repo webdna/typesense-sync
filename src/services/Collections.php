@@ -84,7 +84,7 @@ class Collections extends Component
     {
         $settings = $this->settings();
         $config = $this->config($collection);
-        $context = new SchemaContext($collection, $settings->getLiveNames());
+        $context = new SchemaContext($collection, $settings->getLiveNames(), $config->typeField);
 
         $fields = [];
         $declaredBy = [];

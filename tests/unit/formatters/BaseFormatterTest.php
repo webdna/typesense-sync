@@ -10,6 +10,7 @@ use webdna\typesensesync\formatters\SchemaContext;
 use webdna\typesensesync\models\ResolvedTarget;
 use webdna\typesensesync\tests\fixtures\elements\TestEntry;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
+use webdna\typesensesync\tests\fixtures\formatters\KindsFormatter;
 
 /**
  * BaseFormatter: the document every result shares (BR-11) and what leaves search (BR-8).
@@ -119,5 +120,36 @@ class BaseFormatterTest extends Unit
         foreach (['title', 'type', 'priority', 'postDate', 'expiryDate'] as $required) {
             $this->assertArrayNotHasKey('optional', $byName[$required], $required);
         }
+    }
+
+    public function testTheTypeIsWrittenWhereTheTargetsCollectionNamesIt(): void
+    {
+        $formatter = (new DocumentFormatter())->setTarget(new ResolvedTarget(['typeField' => 'marketplace']));
+        $document = $formatter->format(new TestEntry(['id' => 5, 'title' => 'x']));
+
+        $this->assertSame('Article', $document['marketplace']);
+        $this->assertArrayNotHasKey('type', $document);
+    }
+
+    public function testTheSchemaDeclaresTheTypeWhereTheContextNamesIt(): void
+    {
+        $schema = (new DocumentFormatter())->schema(new SchemaContext('people', [], 'marketplace'));
+        $byName = array_column($schema, null, 'name');
+
+        $this->assertSame(['name' => 'marketplace', 'type' => 'string', 'facet' => true], $byName['marketplace']);
+        $this->assertArrayNotHasKey('type', $byName);
+        $this->assertSame('type', (new SchemaContext('content', []))->getTypeField(), 'the default');
+    }
+
+    public function testAFormatterKeepsItsOwnTypeBesideARenamedTypeField(): void
+    {
+        $formatter = (new KindsFormatter())->setTarget(new ResolvedTarget(['typeField' => 'marketplace']));
+        $document = $formatter->format(new TestEntry(['id' => 5, 'title' => 'x']));
+        $schema = array_column($formatter->schema(new SchemaContext('people', [], 'marketplace')), null, 'name');
+
+        $this->assertSame('Article', $document['marketplace']);
+        $this->assertSame(['Collector', 'Dealer'], $document['type']);
+        $this->assertSame('string', $schema['marketplace']['type']);
+        $this->assertSame('string[]', $schema['type']['type']);
     }
 }

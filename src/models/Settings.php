@@ -286,6 +286,7 @@ class Settings extends Model
             $collections[$handle] = new CollectionConfig([
                 'handle' => $handle,
                 'name' => isset($config['name']) ? (string)$config['name'] : null,
+                'typeField' => self::typeFieldOf($config),
                 'prefix' => $prefix,
                 'schema' => array_values(array_filter((array)($config['schema'] ?? []), 'is_array')),
                 'defaultSortingField' => isset($config['defaultSortingField']) ? (string)$config['defaultSortingField'] : null,
@@ -650,6 +651,19 @@ class Settings extends Model
             foreach (array_diff(array_keys((array)($config['search'] ?? [])), CollectionConfig::SEARCH_KEYS) as $key) {
                 $errors[] = Craft::t('typesense-sync', 'Collection "{handle}" sets an unknown search key "{key}".', ['handle' => $handle, 'key' => $key]);
             }
+
+            if (array_key_exists('typeField', $config)) {
+                $typeField = $config['typeField'];
+
+                if (!is_string($typeField) || trim($typeField) === '') {
+                    $errors[] = Craft::t('typesense-sync', 'Collection "{handle}" sets "typeField" to something other than a field name.', ['handle' => $handle]);
+                } elseif (in_array(trim($typeField), CollectionConfig::BASE_FIELDS, true)) {
+                    $errors[] = Craft::t('typesense-sync', 'Collection "{handle}" names its type field "{field}", which every document already uses for something else.', [
+                        'handle' => $handle,
+                        'field' => trim($typeField),
+                    ]);
+                }
+            }
         }
 
         foreach ($collections as $handle => $collection) {
@@ -842,7 +856,7 @@ class Settings extends Model
         $references = [];
 
         foreach ($collections as $handle => $collection) {
-            $context = new SchemaContext($handle, $liveNames);
+            $context = new SchemaContext($handle, $liveNames, $collection->typeField);
             $fields = [];
 
             foreach ($this->formattersFor($handle) as $class) {
@@ -1066,12 +1080,31 @@ class Settings extends Model
      */
     public function markValidity(ResolvedTarget $target): ResolvedTarget
     {
-        $target->valid = $target->collection !== null
-            && $this->getCollectionConfig($target->collection) !== null
+        $collection = $target->collection !== null ? $this->getCollectionConfig($target->collection) : null;
+
+        $target->valid = $collection !== null
             && $target->formatter !== null
             && is_subclass_of($target->formatter, FormatterInterface::class);
+        // Taken from the collection the target routes to now, so a target rerouted by a
+        // resolve-target handler writes the type where its new collection expects it.
+        $target->typeField = $collection->typeField ?? CollectionConfig::DEFAULT_TYPE_FIELD;
 
         return $target;
+    }
+
+    /**
+     * A collection's type field: the one it names, else the default. An unusable value is
+     * reported by getProblems() and falls back here, so a bad config cannot build a nameless field.
+     *
+     * @param array<mixed> $config
+     */
+    private static function typeFieldOf(array $config): string
+    {
+        $field = is_string($config['typeField'] ?? null) ? trim($config['typeField']) : '';
+
+        return $field !== '' && !in_array($field, CollectionConfig::BASE_FIELDS, true)
+            ? $field
+            : CollectionConfig::DEFAULT_TYPE_FIELD;
     }
 
     private function env(string $value): string

@@ -8,6 +8,7 @@ use webdna\typesensesync\models\SourceConfig;
 use webdna\typesensesync\tests\fixtures\formatters\BackReferencingFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\ConflictingFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\EventsFormatter;
+use webdna\typesensesync\tests\fixtures\formatters\KindsFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\NewsFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\NotAFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\ReferencingFormatter;
@@ -102,6 +103,46 @@ class SettingsTest extends Unit
         $this->assertSame(['views'], $content->counters);
         $this->assertFalse($content->publicationWindow);
         $this->assertSame(['email'], $content->excludeFields);
+    }
+
+    public function testACollectionNamesItsTypeFieldAndItsTargetsCarryIt(): void
+    {
+        $settings = $this->settings([], ['content' => [], 'people' => ['typeField' => ' marketplace ']], [
+            ['handle' => 'news', 'collection' => 'content', 'formatter' => NewsFormatter::class],
+            ['kind' => 'users', 'collection' => 'people', 'formatter' => KindsFormatter::class],
+        ]);
+
+        $this->assertSame('type', $settings->getCollectionConfig('content')?->typeField);
+        $this->assertSame('marketplace', $settings->getCollectionConfig('people')?->typeField);
+        $this->assertSame('type', $settings->resolveTarget(SourceConfig::KIND_SECTION, 'news')?->typeField);
+        $this->assertSame('marketplace', $settings->resolveTarget(SourceConfig::KIND_USERS)?->typeField);
+        $this->assertSame([], $settings->getProblems([]), 'a formatter keeping its own type list is no conflict');
+    }
+
+    public function testAnUnusableTypeFieldIsAProblemAndFallsBackToType(): void
+    {
+        foreach ([[''], ['  '], [['marketplace']], [7]] as [$value]) {
+            $settings = $this->settings([], ['content' => ['typeField' => $value]]);
+
+            $this->assertProblem('Collection "content" sets "typeField" to something other than a field name', $settings);
+            $this->assertSame('type', $settings->getCollectionConfig('content')?->typeField);
+        }
+
+        foreach (['id', 'title', 'url', 'priority', 'postDate', 'expiryDate', 'keywords'] as $base) {
+            $settings = $this->settings([], ['content' => ['typeField' => $base]]);
+
+            $this->assertProblem('names its type field "' . $base . '", which every document already uses', $settings);
+            $this->assertSame('type', $settings->getCollectionConfig('content')?->typeField, $base);
+        }
+    }
+
+    public function testAFormatterUsingTypeForItsOwnListConflictsUnlessTheTypeFieldMoves(): void
+    {
+        $settings = $this->settings([], ['people' => []], [
+            ['kind' => 'users', 'collection' => 'people', 'formatter' => KindsFormatter::class],
+        ]);
+
+        $this->assertProblem('declare field "type" differently', $settings);
     }
 
     public function testOnlyDeclaredEnabledSourcesResolve(): void

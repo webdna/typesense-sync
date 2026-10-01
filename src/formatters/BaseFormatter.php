@@ -14,6 +14,7 @@ use craft\helpers\UrlHelper;
 use DateTimeInterface;
 use Throwable;
 use webdna\typesensesync\helpers\Commerce;
+use webdna\typesensesync\models\CollectionConfig;
 use webdna\typesensesync\models\ResolvedTarget;
 use webdna\typesensesync\TypesenseSync;
 
@@ -115,7 +116,7 @@ abstract class BaseFormatter implements FormatterInterface
     {
         return [
             ['name' => 'title', 'type' => 'string', 'sort' => true],
-            ['name' => 'type', 'type' => 'string', 'facet' => true],
+            ['name' => $context->getTypeField(), 'type' => 'string', 'facet' => true],
             ['name' => 'url', 'type' => 'string', 'index' => false, 'optional' => true],
             ['name' => 'priority', 'type' => 'int32'],
             // Required, not optional: the publication-window filter needs both on every document.
@@ -138,9 +139,9 @@ abstract class BaseFormatter implements FormatterInterface
      * Fields specific to this formatter. Null, '' and [] are dropped before indexing, so a value
      * can be returned unconditionally.
      *
-     * A field named like a base field replaces it — including `type`, so a subclass that needs
-     * `type` for its own attribute should override documentType() instead, or name its field
-     * differently.
+     * A field named like a base field replaces it — including the type field. A collection whose
+     * documents need `type` for their own attribute names its type field elsewhere with the
+     * collection's `typeField` key; to change only the type's value, override documentType().
      *
      * @return array<string, mixed>
      */
@@ -155,7 +156,7 @@ abstract class BaseFormatter implements FormatterInterface
             'id' => $this->documentId($element),
             // Never empty: title is a required field.
             'title' => (string)($element->title ?: '#' . $element->id),
-            'type' => $this->documentType($element),
+            $this->typeField() => $this->documentType($element),
             'url' => $this->url($element),
             // Lower sorts first.
             'priority' => $this->target->priority ?? 100,
@@ -163,6 +164,15 @@ abstract class BaseFormatter implements FormatterInterface
             'expiryDate' => $this->expiresAt($element),
             'keywords' => $this->harvestKeywords($element),
         ];
+    }
+
+    /**
+     * The field the document type is written into: the target collection's `typeField`, else
+     * `type` for a formatter used without a target.
+     */
+    protected function typeField(): string
+    {
+        return $this->target->typeField ?? CollectionConfig::DEFAULT_TYPE_FIELD;
     }
 
     /**
