@@ -101,6 +101,22 @@ class SearchTest extends Unit
         );
     }
 
+    public function testAHandlerThatRefusesTheKeyLeavesNothingToSearchWith(): void
+    {
+        Event::on(Search::class, Search::EVENT_DEFINE_SCOPED_KEY, function(DefineScopedKeyEvent $event) {
+            $event->filters[] = 'status:=active';
+            $event->isValid = false;
+        });
+
+        $this->assertNull($this->search()->scopedKeyParams('content'));
+        $this->assertNull($this->search()->scopedKey('content'));
+        $this->assertNull($this->search()->searchConfig('content'));
+        $this->assertSame('t_content', $this->search()->collectionName('content'), 'the name is still known');
+
+        $html = Craft::$app->getView()->renderString("{{ craft.typesense.searchConfig('content') is null ? 'unavailable' }}");
+        $this->assertSame('unavailable', $html);
+    }
+
     public function testOtherSearchParametersAreEmbeddedButThePluginsOwnCannotBeSet(): void
     {
         $params = $this->search()->scopedKeyParams('content', [

@@ -4,6 +4,7 @@
 
 ### Added
 - A collection can name the field its documents carry their type in with `typeField` (default `type`), so documents that use `type` for a field of their own keep it. `BaseFormatter`'s schema and documents both follow it, `SchemaContext::getTypeField()` gives it to a formatter's schema, and a value that is not a field name or that names another base field is reported as a problem.
+- `Search::EVENT_DEFINE_SCOPED_KEY` is cancellable: a handler that sets `$event->isValid = false` refuses the key, and `scopedKey()`, `searchConfig()` and `scopedKeyParams()` return null, so a page fails closed when a filter its key must carry cannot be built.
 
 ## 1.0.0-beta.1 - 2026-09-30
 
