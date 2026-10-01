@@ -205,6 +205,7 @@ control panel value.
 | Key | Default | |
 |---|---|---|
 | `name` | prefix + handle | *env.* An explicit live name, e.g. to keep names a cluster already uses. |
+| `typeField` | `'type'` | The field `BaseFormatter` writes the document type into. Name another when this collection's documents use `type` for something of their own. Changing it later needs a recreate and a reindex. |
 | `defaultSortingField` | none | Changing it later needs a recreate. |
 | `enableNestedFields` | `true` | Changing it later needs a recreate. |
 | `schema` | `[]` | Typesense field definitions added to whatever the formatters declare, e.g. a field another process writes. |
@@ -243,6 +244,8 @@ The utility and `setup` list these as problems, and `setup` exits non-zero:
 - a source naming an undeclared collection
 - a formatter class that is missing or does not implement `FormatterInterface`
 - two formatters in one collection declaring the same field differently
+- a `typeField` that is not a field name, or names another field every document carries (`id`,
+  `title`, `url`, `priority`, `postDate`, `expiryDate`, `keywords`)
 - two collections resolving to the same live name
 - a reference field naming an undeclared collection, or references forming a cycle
 - an analytics rule with an unknown type or an undeclared collection, or an events key equal to the
@@ -288,6 +291,20 @@ class ContentFormatter extends BaseFormatter
 **Every document carries** `id`, `title`, `type` (the entry type, product type or element type's
 name), `url` (root-relative), `priority`, `postDate` and `expiryDate` (Unix seconds; "never" is
 `BaseFormatter::FAR_FUTURE`, 253402300799), and `keywords`.
+
+The type is written into the field the collection's `typeField` names, `type` unless it names
+another. A collection whose documents need `type` for their own field — a list of a member's kinds,
+say — moves the document type out of the way rather than overwriting it:
+
+```php
+'collections' => [
+    'people' => ['typeField' => 'kind'],
+],
+```
+
+`BaseFormatter::schema()` and `format()` both follow it, so a formatter declares and returns its own
+`type` as usual. Read the name in `schema()` with `$context->getTypeField()`. To change the type's
+*value* rather than its field, override `documentType()`.
 
 - **Make your own fields `optional`.** Several formatters can write into one collection, and no
   single document carries every field.

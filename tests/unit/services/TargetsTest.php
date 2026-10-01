@@ -152,6 +152,27 @@ class TargetsTest extends Unit
         $this->assertNull($targets->resolveTargetFor($this->entry()));
     }
 
+    public function testARerouteTakesTheTypeFieldOfTheNewCollection(): void
+    {
+        $settings = $this->settings();
+        $settings->collections['people'] = ['typeField' => 'marketplace'];
+        $targets = $this->targets($settings);
+        $before = $targets->resolveTargetFor($this->entry());
+        $this->assertNotNull($before);
+        $this->assertSame('type', $before->typeField);
+
+        $targets->on(Targets::EVENT_RESOLVE_TARGET, static function(ResolveTargetEvent $event) {
+            if ($event->target !== null) {
+                $event->target->collection = 'people';
+            }
+        });
+
+        $rerouted = $targets->resolveTargetFor($this->entry());
+        $this->assertNotNull($rerouted);
+        $this->assertSame('people', $rerouted->collection);
+        $this->assertSame('marketplace', $rerouted->typeField);
+    }
+
     // Element types, formatters and sites -------------------------------------------------------
 
     public function testElementTypesFollowTheDeclaredSourceKinds(): void

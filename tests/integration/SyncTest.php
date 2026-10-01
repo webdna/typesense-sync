@@ -25,6 +25,7 @@ use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\services\Collections;
 use webdna\typesensesync\services\Sync;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
+use webdna\typesensesync\tests\fixtures\formatters\KindsFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\RefusingFormatter;
 use webdna\typesensesync\tests\Support\TestCollections;
 use webdna\typesensesync\TypesenseSync;
@@ -72,6 +73,27 @@ class SyncTest extends Unit
         TestCollections::deleteAll($this->admin, $this->prefix);
         $this->plugin->targets->setSettings(null);
         $this->plugin->client->setClient(null);
+    }
+
+    public function testACollectionNamingItsTypeFieldKeepsAFormattersOwnTypeList(): void
+    {
+        $this->useSettings($this->settings(values: [
+            'collections' => ['people' => ['typeField' => 'marketplace']],
+            'sources' => [['handle' => $this->sections['news']->handle, 'collection' => 'people', 'formatter' => KindsFormatter::class]],
+        ]));
+        $applied = $this->plugin->collections->apply('people');
+        $this->assertSame(Collections::ACTION_CREATE, $applied['action'], $applied['message']);
+
+        $entry = $this->saveEntry('news', 'Ada');
+        $this->runQueue();
+
+        $document = $this->admin->collections[$this->prefix . 'people']->documents[(string)$entry->id]->retrieve();
+        $this->assertSame($entry->getType()->name, $document['marketplace']);
+        $this->assertSame(['Collector', 'Dealer'], $document['type']);
+
+        $fields = array_column($this->admin->collections[$this->prefix . 'people']->retrieve()['fields'], 'type', 'name');
+        $this->assertSame('string', $fields['marketplace']);
+        $this->assertSame('string[]', $fields['type']);
     }
 
     // TS-3 - content lifecycle (BR-6, BR-8, BR-9) -----------------------------------------------

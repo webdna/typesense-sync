@@ -22,7 +22,17 @@ class CollectionConfig extends Model
     /**
      * Keys a collection may carry in `config/typesense-sync.php`.
      */
-    public const KEYS = ['name', 'schema', 'defaultSortingField', 'enableNestedFields', 'counters', 'search'];
+    public const KEYS = ['name', 'typeField', 'schema', 'defaultSortingField', 'enableNestedFields', 'counters', 'search'];
+
+    /**
+     * The field a BaseFormatter writes the document type into unless the collection names another.
+     */
+    public const DEFAULT_TYPE_FIELD = 'type';
+
+    /**
+     * The other fields a BaseFormatter writes on every document, which the type cannot share.
+     */
+    public const BASE_FIELDS = ['id', 'title', 'url', 'priority', 'postDate', 'expiryDate', 'keywords'];
 
     /**
      * Keys the collection's `search` array may carry.
@@ -40,6 +50,12 @@ class CollectionConfig extends Model
      * Collection prefix from the plugin settings, already resolved.
      */
     public string $prefix = '';
+
+    /**
+     * The field a BaseFormatter writes the document type into. A collection names another when
+     * its documents already use `type` for something else. Not env-aware: it changes the schema.
+     */
+    public string $typeField = self::DEFAULT_TYPE_FIELD;
 
     /**
      * Field definitions added on top of the union of the formatters' schemas.

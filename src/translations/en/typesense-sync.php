@@ -57,6 +57,8 @@ return [
     'Collection "{handle}" must be an array keyed by a handle.' => 'Collection "{handle}" must be an array keyed by a handle.',
     'Collection "{handle}" sets an unknown key "{key}".' => 'Collection "{handle}" sets an unknown key "{key}".',
     'Collection "{handle}" sets an unknown search key "{key}".' => 'Collection "{handle}" sets an unknown search key "{key}".',
+    'Collection "{handle}" sets "typeField" to something other than a field name.' => 'Collection "{handle}" sets "typeField" to something other than a field name.',
+    'Collection "{handle}" names its type field "{field}", which every document already uses for something else.' => 'Collection "{handle}" names its type field "{field}", which every document already uses for something else.',
     'Collection prefix' => 'Collection prefix',
     'Collections' => 'Collections',
     'Collections and sources' => 'Collections and sources',

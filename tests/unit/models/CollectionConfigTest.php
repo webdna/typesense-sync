@@ -3,7 +3,9 @@
 namespace webdna\typesensesync\tests\unit\models;
 
 use Codeception\Test\Unit;
+use webdna\typesensesync\formatters\SchemaContext;
 use webdna\typesensesync\models\CollectionConfig;
+use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
 use yii\base\InvalidConfigException;
 
 /**
@@ -50,5 +52,17 @@ class CollectionConfigTest extends Unit
         $this->assertNull($collection->getVersionFromName('content'));
         $this->assertNull($collection->getVersionFromName('content_x'));
         $this->assertNull($collection->getVersionFromName('other_content_3'));
+    }
+
+    public function testTheBaseFieldsAreEveryFieldTheBaseDocumentWritesButTheType(): void
+    {
+        $schema = (new DocumentFormatter())->schema(new SchemaContext('content', []));
+        $written = ['id', ...array_column($schema, 'name')];
+
+        $this->assertEqualsCanonicalizing(
+            array_values(array_diff($written, [CollectionConfig::DEFAULT_TYPE_FIELD])),
+            CollectionConfig::BASE_FIELDS,
+        );
+        $this->assertSame('type', (new CollectionConfig())->typeField);
     }
 }

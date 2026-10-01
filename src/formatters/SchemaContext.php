@@ -2,6 +2,8 @@
 
 namespace webdna\typesensesync\formatters;
 
+use webdna\typesensesync\models\CollectionConfig;
+
 /**
  * What a formatter's `schema()` may ask about the collections around it.
  *
@@ -16,11 +18,22 @@ class SchemaContext
     /**
      * @param string $collection Handle of the collection the schema is for.
      * @param array<string, string> $liveNames Live name of every declared collection, by handle.
+     * @param string $typeField The collection's `typeField`: where the document type is written.
      */
     public function __construct(
         private readonly string $collection,
         private readonly array $liveNames,
+        private readonly string $typeField = CollectionConfig::DEFAULT_TYPE_FIELD,
     ) {
+    }
+
+    /**
+     * The field the collection's documents carry their type in: `type` unless the collection
+     * names another with `typeField`.
+     */
+    public function getTypeField(): string
+    {
+        return $this->typeField;
     }
 
     /**

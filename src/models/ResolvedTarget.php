@@ -36,6 +36,12 @@ class ResolvedTarget extends Model
     public ?string $formatter = null;
 
     /**
+     * The field a BaseFormatter writes the document type into: the collection's `typeField`, set
+     * by Settings::markValidity() from the collection the target routes to.
+     */
+    public string $typeField = CollectionConfig::DEFAULT_TYPE_FIELD;
+
+    /**
      * Ranking weight a formatter may write into the document; lower sorts first.
      */
     public int $priority = 100;

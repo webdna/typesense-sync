@@ -1,5 +1,10 @@
 # Release Notes for Typesense Sync
 
+## Unreleased
+
+### Added
+- A collection can name the field its documents carry their type in with `typeField` (default `type`), so documents that use `type` for a field of their own keep it. `BaseFormatter`'s schema and documents both follow it, `SchemaContext::getTypeField()` gives it to a formatter's schema, and a value that is not a field name or that names another base field is reported as a problem.
+
 ## 1.0.0-beta.1 - 2026-09-30
 
 ### Added
