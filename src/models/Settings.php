@@ -36,6 +36,11 @@ class Settings extends Model
 
     /**
      * Connection settings that accept `$ENV_VAR` references and are stored unresolved.
+     *
+     * Each is typed `?string`: while validating, Craft's EnvAttributeParserBehavior swaps in the
+     * resolved value, and a reference to an empty variable resolves to null. A plain `string`
+     * threw a TypeError there, so a save failed instead of validating an empty value. Read them
+     * through the getters, which always return strings.
      */
     private const ENV_ATTRIBUTES = ['host', 'port', 'protocol', 'apiKey', 'searchApiKey', 'collectionPrefix'];
 
@@ -57,24 +62,24 @@ class Settings extends Model
         'stem' => false,
     ];
 
-    public string $host = '';
+    public ?string $host = '';
 
     /**
      * A string so it can hold an `$ENV_VAR` reference; read it with getPort().
      */
-    public string $port = '443';
+    public ?string $port = '443';
 
-    public string $protocol = 'https';
+    public ?string $protocol = 'https';
 
     /**
      * The admin key. It never leaves the server (BR-17).
      */
-    public string $apiKey = '';
+    public ?string $apiKey = '';
 
     /**
      * The search-only key, the only key scoped keys are signed with (BR-17).
      */
-    public string $searchApiKey = '';
+    public ?string $searchApiKey = '';
 
     /**
      * Seconds to wait for a connection.
@@ -101,7 +106,7 @@ class Settings extends Model
     /**
      * Prepended to a collection's handle to make its live name, unless it names itself.
      */
-    public string $collectionPrefix = '';
+    public ?string $collectionPrefix = '';
 
     /**
      * Collections by handle. File only. Typed loosely because the file is user input; a
@@ -1107,7 +1112,7 @@ class Settings extends Model
             : CollectionConfig::DEFAULT_TYPE_FIELD;
     }
 
-    private function env(string $value): string
+    private function env(?string $value): string
     {
         return (string)App::parseEnv($value);
     }

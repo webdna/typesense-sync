@@ -103,7 +103,7 @@ class TypesenseSync extends Plugin
     {
         $settings = $this->getSettings();
 
-        if ($settings->apiKey === '') {
+        if (($settings->apiKey ?? '') === '') {
             $saved = Craft::$app->getProjectConfig()->get(sprintf('plugins.%s.settings.apiKey', self::HANDLE));
             $settings->apiKey = is_string($saved) ? $saved : '';
         }
@@ -119,7 +119,7 @@ class TypesenseSync extends Plugin
     protected function settingsHtml(): ?string
     {
         $settings = $this->getSettings();
-        $isReference = str_starts_with($settings->apiKey, '$');
+        $isReference = str_starts_with($settings->apiKey ?? '', '$');
 
         return Craft::$app->getView()->renderTemplate('typesense-sync/settings.twig', [
             'settings' => $settings,
