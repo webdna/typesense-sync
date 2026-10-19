@@ -1,7 +1,8 @@
 # Plugin Store listing — draft
 
-**Status:** draft by Claude, 30 Sep 2026. Sam owns the final text, the screenshots and the price
-(spec Appendix A, #1, #3 and #4). Nothing here is published until Sam submits it.
+**Status:** drafted by Claude, 30 Sep 2026. Sam set the price and approved the text and the icon on
+19 Oct 2026 (spec Appendix A, #1, #3 and #4); the screenshots are still Sam's. Nothing here is
+published until Sam submits it.
 
 ## Fields
 
@@ -13,13 +14,13 @@
 | Short description | Keep your content in a Typesense search index, with safe, filtered search keys for your pages. |
 | Categories | Search · Developer Tools |
 | Keywords | typesense, search, index, instant search, search keys, analytics |
-| Edition | One edition, paid (price: **Sam — open**) |
+| Edition | One edition: **$99**, renewal **$29** a year (Sam, 19 Oct 2026) |
 | Licence | Craft License |
 | Requires | Craft CMS 5.6+, PHP 8.2+, Typesense 30.0+ |
 | Documentation URL | https://github.com/webdna/typesense-sync/blob/main/README.md |
 | Changelog URL | https://raw.githubusercontent.com/webdna/typesense-sync/main/CHANGELOG.md |
 | Repository | https://github.com/webdna/typesense-sync (**Sam — to create**) |
-| Icon | `src/icon.svg` (draft: a magnifier holding two sync arrows — **Sam to approve or replace**) |
+| Icon | `src/icon.svg`: a magnifier holding two sync arrows (approved by Sam, 19 Oct 2026) |
 
 ## Long description
 
@@ -74,8 +75,9 @@
 
 ## Before submitting
 
-- [ ] Price and renewal (Appendix A #1)
+- [x] Price and renewal: $99, renewal $29 (Appendix A #1)
 - [ ] GitHub repo, Packagist and the developer account connected (Appendix A #2)
-- [ ] Text reviewed and screenshots taken (Appendix A #3)
-- [ ] Icon approved (Appendix A #4)
+- [x] Text reviewed and approved (Appendix A #3)
+- [ ] Screenshots taken (Appendix A #3)
+- [x] Icon approved (Appendix A #4)
 - [ ] `1.0.0` tagged with a matching `CHANGELOG.md` heading

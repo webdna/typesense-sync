@@ -553,10 +553,10 @@ Phases 4–7 are independent once 3 is done; build them in number order unless o
 
 | # | Question | Owner | State |
 |---|---|---|---|
-| 1 | Price and renewal for the single edition | Sam | **Open - blocking release** |
+| 1 | Price and renewal for the single edition | Sam | Resolved 19 Oct 2026: $99, renewal $29 |
 | 2 | Create the public GitHub repo `webdna/typesense-sync`, Packagist package, and connect the Plugin Store developer account | Sam | **Open - blocking release** |
-| 3 | Store listing text and screenshots (Claude drafts in 8.2) | Sam | **Open - blocking release** |
-| 4 | Plugin icon: Claude drafts a simple SVG in 8.2; approve or supply one | Sam | **Open - blocking release** |
+| 3 | Store listing text and screenshots (Claude drafts in 8.2) | Sam | Text approved 19 Oct 2026; **screenshots open - blocking release** |
+| 4 | Plugin icon: Claude drafts a simple SVG in 8.2; approve or supply one | Sam | Resolved 19 Oct 2026: the draft approved |
 
 **Assumptions**
 
