@@ -1,5 +1,11 @@
 # Release Notes for Typesense Sync
 
+## 1.0.0 - 2026-10-19
+
+### Fixed
+- Saving the plugin settings no longer fails with an error when a connection setting names an environment variable that is set but empty; the empty value is saved like any other.
+- *Test connection* and `setup` no longer refuse a correct search-only API key because another key on the server starts with the same four characters. A key that genuinely allows more than search is still refused.
+
 ## 1.0.0-beta.2 - 2026-10-01
 
 ### Added
