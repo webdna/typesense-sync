@@ -91,6 +91,34 @@ class ConnectionTest extends Unit
         $this->assertStringContainsString('allows more than search', $result['problems'][0]);
     }
 
+    public function testAnotherKeySharingTheFirstFourCharactersDoesNotRefuseASearchOnlyKey(): void
+    {
+        // Typesense lists only a key's first four characters. Seen in a real site: a search-only
+        // key and an events key both starting `harb`.
+        $prefix = substr(bin2hex(random_bytes(2)), 0, 4);
+        $search = $this->createKey(['documents:search'], $prefix . '-demo-search-only');
+        $this->createKey(['analytics/events:create'], $prefix . '-demo-events');
+        $this->createKey(['documents:*'], $prefix . '-demo-documents');
+
+        $result = $this->service->testConnection($this->settings(['searchApiKey' => $search]));
+
+        $this->assertTrue($result['ok'], implode(' ', $result['problems']));
+    }
+
+    public function testABroaderKeySharingItsFirstFourCharactersWithASearchOnlyKeyIsRefused(): void
+    {
+        $prefix = substr(bin2hex(random_bytes(2)), 0, 4);
+        $this->createKey(['documents:search'], $prefix . '-demo-search-only');
+
+        foreach ([['analytics/events:create'], ['documents:search', 'documents:get']] as $i => $actions) {
+            $key = $this->createKey($actions, $prefix . '-demo-broad-' . $i);
+            $result = $this->service->testConnection($this->settings(['searchApiKey' => $key]));
+
+            $this->assertFalse($result['ok'], implode(',', $actions));
+            $this->assertStringContainsString('allows more than search', $result['problems'][0]);
+        }
+    }
+
     public function testAKeyTheServerDoesNotHoldIsRefused(): void
     {
         $result = $this->service->testConnection($this->settings(['searchApiKey' => 'zzzz-no-such-key']));
@@ -111,13 +139,14 @@ class ConnectionTest extends Unit
     /**
      * @param list<string> $actions
      */
-    private function createKey(array $actions): string
+    private function createKey(array $actions, ?string $value = null): string
     {
-        $key = $this->service->createClient($this->settings())->getKeys()->create([
+        $key = $this->service->createClient($this->settings())->getKeys()->create(array_filter([
             'description' => 'typesense-sync connection test',
             'actions' => $actions,
             'collections' => ['*'],
-        ]);
+            'value' => $value,
+        ]));
         $this->createdKeys[] = (int)$key['id'];
 
         return (string)$key['value'];

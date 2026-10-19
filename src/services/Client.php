@@ -201,8 +201,12 @@ class Client extends Component
      *
      * Typesense never returns a key's value, only its first four characters, so the key is
      * checked two ways. It is used to list collections, which a search-only key cannot do; that
-     * catches the admin key and the server's bootstrap key, which `/keys` does not list. Then
-     * every listed key sharing its prefix must allow `documents:search` and nothing else.
+     * catches the admin key and the server's bootstrap key, which `/keys` does not list. Then the
+     * listed keys sharing its prefix are read: when it is the only one, its actions must be
+     * exactly `documents:search`. When others share the prefix the listing cannot say which is
+     * the configured key, so every broader one is ruled out by a probe the search key must be
+     * refused; a broader key with no safe probe refuses the search key, since it cannot be told
+     * apart.
      */
     public function searchKeyProblem(TypesenseClient $admin, Settings $settings): ?string
     {
@@ -231,19 +235,105 @@ class Client extends Component
             ]);
         }
 
-        $matches = array_filter(
+        $matches = array_values(array_filter(
             is_array($keys) ? $keys : [],
             fn($key) => is_array($key) && ($key['value_prefix'] ?? null) === substr($searchKey, 0, 4),
-        );
+        ));
+        $notOnServer = Craft::t('typesense-sync', 'The search-only API key is not a key on this server.');
 
         if ($matches === []) {
-            return Craft::t('typesense-sync', 'The search-only API key is not a key on this server.');
+            return $notOnServer;
         }
 
-        foreach ($matches as $key) {
-            $actions = is_array($key['actions'] ?? null) ? $key['actions'] : [];
-            if (array_values($actions) !== self::SEARCH_ACTIONS) {
+        $broad = array_filter($matches, fn(array $key) => self::actionsOf($key) !== self::SEARCH_ACTIONS);
+
+        if ($broad === []) {
+            return null;
+        }
+
+        // The only key with this prefix is the configured one, so its actions are decisive.
+        if (count($matches) === 1) {
+            return $tooBroad;
+        }
+
+        // Another key shares the prefix, so the listing cannot say which one is configured. Each
+        // broader key is ruled out by asking the search key to do something that key may do: the
+        // server checks a key's actions before it reads the request, so a refusal proves the
+        // search key is not that key, and anything else proves it allows more than search.
+        $searchClient = $this->createClient($settings, 0, $searchKey);
+
+        foreach ($broad as $key) {
+            $probe = self::probeFor($key);
+
+            if ($probe === null) {
+                return Craft::t('typesense-sync', 'The search-only API key cannot be told apart from another key on this server that starts with the same four characters and allows more than search. Create the search-only key with a different start.');
+            }
+
+            try {
+                $probe($searchClient);
+
                 return $tooBroad;
+            } catch (RequestUnauthorized) {
+                // Not this key.
+            } catch (TypesenseClientError) {
+                // Through authentication and refused only for the request itself.
+                return $tooBroad;
+            } catch (Throwable $e) {
+                return $this->describeFailure($e, $settings, 'search-only API key');
+            }
+        }
+
+        return count($broad) === count($matches) ? $notOnServer : null;
+    }
+
+    /**
+     * @param array<mixed> $key
+     * @return list<mixed>
+     */
+    private static function actionsOf(array $key): array
+    {
+        return is_array($key['actions'] ?? null) ? array_values($key['actions']) : [];
+    }
+
+    /**
+     * A request the given key is allowed to make and a search-only key is not, which writes
+     * nothing — or null when none of its actions has one. Typesense matches an action exactly,
+     * `*` for everything, or `<resource>:*` for every action on that resource.
+     *
+     * @param array<mixed> $key
+     * @return (callable(TypesenseClient): mixed)|null
+     */
+    private static function probeFor(array $key): ?callable
+    {
+        $probes = [
+            'keys:list' => fn(TypesenseClient $client) => $client->getKeys()->retrieve(),
+            'collections:list' => fn(TypesenseClient $client) => $client->getCollections()->retrieve(),
+            'aliases:list' => fn(TypesenseClient $client) => $client->getAliases()->retrieve(),
+            'analytics/rules:list' => fn(TypesenseClient $client) => $client->getAnalytics()->rules()->retrieve(),
+            // An empty event is refused as malformed by a key allowed to post events.
+            'analytics/events:create' => fn(TypesenseClient $client) => $client->getAnalytics()->events()->create([]),
+        ];
+
+        // Fetching one document is scoped by collection, so it needs a name the key covers.
+        $collections = is_array($key['collections'] ?? null) ? $key['collections'] : [];
+        $collection = in_array('*', $collections, true) ? 'typesense-sync-probe' : null;
+        foreach ($collections as $name) {
+            if ($collection === null && is_string($name) && preg_match('/^[A-Za-z0-9_-]+$/', $name) === 1) {
+                $collection = $name;
+            }
+        }
+        if ($collection !== null) {
+            $probes['documents:get'] = fn(TypesenseClient $client) => $client->getCollections()[$collection]->getDocuments()['typesense-sync-probe']->retrieve();
+        }
+
+        foreach (self::actionsOf($key) as $action) {
+            if (!is_string($action)) {
+                continue;
+            }
+            foreach ($probes as $required => $probe) {
+                if ($action === '*' || $action === $required || (str_ends_with($action, ':*') && str_starts_with($required, substr($action, 0, -1)))) {
+                    return $probe;
+                }
             }
         }
 
