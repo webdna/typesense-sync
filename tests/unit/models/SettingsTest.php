@@ -23,7 +23,7 @@ class SettingsTest extends Unit
 {
     protected function _after(): void
     {
-        unset($_SERVER['TS_TEST_HOST'], $_SERVER['TS_TEST_KEY']);
+        unset($_SERVER['TS_TEST_HOST'], $_SERVER['TS_TEST_KEY'], $_SERVER['TS_TEST_EMPTY']);
     }
 
     // Connection ------------------------------------------------------------------------------
@@ -79,6 +79,24 @@ class SettingsTest extends Unit
         $this->assertArrayHasKey('port', $settings->getErrors());
         $this->assertArrayHasKey('batchSize', $settings->getErrors());
         $this->assertTrue((new Settings(['host' => '', 'apiKey' => '']))->validate(), 'unconfigured settings still save');
+    }
+
+    public function testAReferenceToAnEmptyVariableValidatesAsEmpty(): void
+    {
+        // Craft's env parser resolves an empty variable to null while validating; a string-typed
+        // property threw a TypeError there and the settings could not be saved at all.
+        $_SERVER['TS_TEST_EMPTY'] = '';
+        $attributes = ['host', 'port', 'protocol', 'apiKey', 'searchApiKey', 'collectionPrefix'];
+        $settings = new Settings(array_fill_keys($attributes, '$TS_TEST_EMPTY'));
+
+        $this->assertTrue($settings->validate());
+        foreach ($attributes as $attribute) {
+            $this->assertSame('$TS_TEST_EMPTY', $settings->$attribute, "$attribute keeps its reference");
+        }
+        $this->assertSame('', $settings->getHost());
+        $this->assertSame('', $settings->getSearchApiKey());
+        $this->assertSame('', $settings->getCollectionPrefix());
+        $this->assertFalse($settings->isConfigured());
     }
 
     // Parsing and resolution ------------------------------------------------------------------
