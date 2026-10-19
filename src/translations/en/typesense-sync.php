@@ -212,6 +212,7 @@ return [
     'The connection test could not be run.' => 'The connection test could not be run.',
     'The prune failed; nothing was removed. The typesense-sync log says why.' => 'The prune failed; nothing was removed. The typesense-sync log says why.',
     'The search-only API key allows more than search: it must allow `documents:search` and nothing else.' => 'The search-only API key allows more than search: it must allow `documents:search` and nothing else.',
+    'The search-only API key cannot be told apart from another key on this server that starts with the same four characters and allows more than search. Create the search-only key with a different start.' => 'The search-only API key cannot be told apart from another key on this server that starts with the same four characters and allows more than search. Create the search-only key with a different start.',
     'The search-only API key is not a key on this server.' => 'The search-only API key is not a key on this server.',
     'The server answered with an error: {message}' => 'The server answered with an error: {message}',
     'The Typesense server’s host name, without the protocol or port.' => 'The Typesense server’s host name, without the protocol or port.',

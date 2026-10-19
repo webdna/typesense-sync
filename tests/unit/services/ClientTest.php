@@ -217,15 +217,65 @@ class ClientTest extends Unit
         $this->assertStringContainsString('allows more than search', $result['problems'][0]);
     }
 
-    public function testASharedPrefixIsRefusedUnlessEveryMatchIsSearchOnly(): void
+    public function testAnotherKeySharingThePrefixIsToldApartByAProbe(): void
+    {
+        // Seen in a real site: a search-only key and an events key both starting `harb`. The
+        // search key is refused the events key's action, so it is not that key.
+        $service = $this->withKeys([
+            ['value_prefix' => 'srch', 'actions' => ['documents:search'], 'collections' => ['*']],
+            ['value_prefix' => 'srch', 'actions' => ['analytics/events:create'], 'collections' => ['*']],
+        ], [$this->forbidden()]);
+        $result = $service->testConnection($this->settings(['searchApiKey' => self::SEARCH_KEY]));
+
+        $this->assertSame(['ok' => true, 'version' => '30.2', 'problems' => []], $result);
+        $this->assertSame('POST /analytics/events [' . self::SEARCH_KEY . ']', $service->requests()[3]);
+    }
+
+    public function testASharedPrefixIsRefusedWhenTheSearchKeyHoldsTheBroaderAction(): void
+    {
+        // Allowed through authentication: the server answers 404 for the missing document.
+        $service = $this->withKeys([
+            ['value_prefix' => 'srch', 'actions' => ['documents:search'], 'collections' => ['*']],
+            ['value_prefix' => 'srch', 'actions' => ['documents:*'], 'collections' => ['*']],
+        ], [$this->json(['message' => 'Not found.'], 404)]);
+        $result = $service->testConnection($this->settings(['searchApiKey' => self::SEARCH_KEY]));
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('allows more than search', $result['problems'][0]);
+        $this->assertStringStartsWith('GET /collections/', $service->requests()[3]);
+    }
+
+    public function testASharedPrefixWithAnUnprobeableKeyIsRefused(): void
     {
         $service = $this->withKeys([
-            ['value_prefix' => 'srch', 'actions' => ['documents:search']],
-            ['value_prefix' => 'srch', 'actions' => ['documents:*']],
+            ['value_prefix' => 'srch', 'actions' => ['documents:search'], 'collections' => ['*']],
+            ['value_prefix' => 'srch', 'actions' => ['stopwords:upsert'], 'collections' => ['*']],
         ]);
         $result = $service->testConnection($this->settings(['searchApiKey' => self::SEARCH_KEY]));
 
         $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('cannot be told apart', $result['problems'][0]);
+        $this->assertCount(3, $service->requests(), 'Nothing is probed that the plugin cannot read safely');
+    }
+
+    public function testASoleKeyWithThePrefixIsDecisiveWithoutAProbe(): void
+    {
+        $service = $this->withKeys([['value_prefix' => 'srch', 'actions' => ['documents:*'], 'collections' => ['*']]]);
+        $result = $service->testConnection($this->settings(['searchApiKey' => self::SEARCH_KEY]));
+
+        $this->assertStringContainsString('allows more than search', $result['problems'][0]);
+        $this->assertCount(3, $service->requests());
+    }
+
+    public function testASearchKeyThatIsNoneOfTheBroadKeysSharingItsPrefixIsNotOnTheServer(): void
+    {
+        $service = $this->withKeys([
+            ['value_prefix' => 'srch', 'actions' => ['keys:*'], 'collections' => ['*']],
+            ['value_prefix' => 'srch', 'actions' => ['aliases:list'], 'collections' => ['*']],
+        ], [$this->forbidden(), $this->forbidden()]);
+        $result = $service->testConnection($this->settings(['searchApiKey' => self::SEARCH_KEY]));
+
+        $this->assertSame(['The search-only API key is not a key on this server.'], $result['problems']);
     }
 
     public function testASearchKeyTheServerDoesNotHoldIsRefused(): void
@@ -284,14 +334,21 @@ class ClientTest extends Unit
 
     /**
      * @param list<array<string, mixed>> $keys
+     * @param list<Response> $probes answers to the probes that follow the key listing
      */
-    private function withKeys(array $keys): MockedClient
+    private function withKeys(array $keys, array $probes = []): MockedClient
     {
         return new MockedClient([
             $this->json(['version' => '30.2']),
-            $this->json(['message' => 'Forbidden - a valid `x-typesense-api-key` header must be sent.'], 401),
+            $this->forbidden(),
             $this->json(['keys' => $keys]),
+            ...$probes,
         ]);
+    }
+
+    private function forbidden(): Response
+    {
+        return $this->json(['message' => 'Forbidden - a valid `x-typesense-api-key` header must be sent.'], 401);
     }
 
     /**
