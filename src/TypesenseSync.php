@@ -29,6 +29,7 @@ use webdna\typesensesync\services\Analytics;
 use webdna\typesensesync\services\Client;
 use webdna\typesensesync\services\Collections;
 use webdna\typesensesync\services\Rules;
+use webdna\typesensesync\services\RulesTransfer;
 use webdna\typesensesync\services\Search;
 use webdna\typesensesync\services\Sync;
 use webdna\typesensesync\services\Targets;
@@ -54,6 +55,7 @@ use yii\base\Event;
  * @property-read Search $search
  * @property-read Analytics $analytics
  * @property-read Rules $rules
+ * @property-read RulesTransfer $rulesTransfer
  */
 class TypesenseSync extends Plugin
 {
@@ -92,6 +94,7 @@ class TypesenseSync extends Plugin
                 'search' => Search::class,
                 'analytics' => Analytics::class,
                 'rules' => Rules::class,
+                'rulesTransfer' => RulesTransfer::class,
             ],
         ];
     }

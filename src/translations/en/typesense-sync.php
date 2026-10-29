@@ -398,4 +398,23 @@ return [
     'Can’t check' => 'Can’t check',
     'In search' => 'In search',
     'Push now' => 'Push now',
+
+    // Export and import (rules spec 4.1).
+    'Rule “{query}”: element {id} no longer feeds this collection and was left out.' => 'Rule “{query}”: element {id} no longer feeds this collection and was left out.',
+    'The file is not valid JSON.' => 'The file is not valid JSON.',
+    'The file is not a version {version} rules export.' => 'The file is not a version {version} rules export.',
+    'The file needs a collection, a list of rules and a list of synonyms.' => 'The file needs a collection, a list of rules and a list of synonyms.',
+    'Rule {n} in the file is malformed.' => 'Rule {n} in the file is malformed.',
+    'Synonym group {n} in the file is malformed.' => 'Synonym group {n} in the file is malformed.',
+    'Rule “{query}”: {element} was not found here and was left out.' => 'Rule “{query}”: {element} was not found here and was left out.',
+    'Rule “{query}” was left out: none of its entries were found here.' => 'Rule “{query}” was left out: none of its entries were found here.',
+    'Rule “{query}” in the file was refused: {error}' => 'Rule “{query}” in the file was refused: {error}',
+    'Synonym group “{words}” in the file was refused: {error}' => 'Synonym group “{words}” in the file was refused: {error}',
+    'Exported {rules} rules and {synonyms} synonym groups from {collection} to {file}.' => 'Exported {rules} rules and {synonyms} synonym groups from {collection} to {file}.',
+    'Cannot read {file}.' => 'Cannot read {file}.',
+    'Nothing was imported: {reason}' => 'Nothing was imported: {reason}',
+    'This replaces every rule and synonym group on {collection}.' => 'This replaces every rule and synonym group on {collection}.',
+    'Imported {rules} rules and {synonyms} synonym groups into {collection}.' => 'Imported {rules} rules and {synonyms} synonym groups into {collection}.',
+    'Rules and synonyms are live.' => 'Rules and synonyms are live.',
+    'Left out:' => 'Left out:',
 ];

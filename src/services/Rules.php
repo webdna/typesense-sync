@@ -290,6 +290,15 @@ class Rules extends Component
         return array_values($pickers);
     }
 
+    /**
+     * The element, in the site its collection indexes, when it feeds the collection — the BR-8 test
+     * a save applies, for callers that resolve elements themselves (export, import).
+     */
+    public function elementFor(string $collection, int $elementId): ?ElementInterface
+    {
+        return $this->elementFeeding($collection, $elementId)[0] ?? null;
+    }
+
     // What Typesense is sent ---------------------------------------------------------------------
 
     /**

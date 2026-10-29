@@ -682,9 +682,40 @@ proven before any screen writes rules.
       Typesense. And from the commit security review: a synonym group's words are escaped in the
       table (the table renders a plain column as HTML; the title slot already escapes). 3.2's
       tests: 23 in RulesControllerTest; B5 #1 green on 8.2 + 8.4: 242 unit + 145 integration.
-- [ ] **4.1 Export and import** - `src/console/controllers/RulesController.php`,
+- [x] **4.1 Export and import** - `src/console/controllers/RulesController.php`,
       `src/services/RulesTransfer.php`
       Rules: BR-16, BR-17 · Verify: B5 #1, TS-7, TN-11, TN-13
+      *As built (29 Oct):* component `rulesTransfer`: `export(handle)` → `{data, leftOut}`,
+      `read(json)` (the whole file checked before anything is written: JSON, `version` exactly int 1,
+      a collection, both lists, every rule and group's keys and types, dates as ISO 8601 (`DATE_ATOM`),
+      else `InvalidArgumentException` naming the rule or group by its 1-based place), `import(data)` →
+      `{rules, synonyms, leftOut}`, and static `reference(element)`. An element travels as `{uid, type
+      (class), site (handle), section | group | productType, slug}`; **a user has no slug, so it
+      travels by `username`** (a narrowing of BR-16's wording, not of its intent). Dates are written in
+      UTC. Resolution: uid (in that site), then type + site + source + slug/username, each answer
+      accepted only if it **feeds the collection** — the same test a CP save applies, now public as
+      `Rules::elementFor(collection, id)`; criteria are called as query methods, so one an element type
+      lacks is caught and reads as not found. Export leaves out (and lists) an element that no longer
+      feeds the collection; import leaves out and lists an unresolved element, and a rule left with
+      nothing to pin or hide. **Import is one transaction**: delete the collection's rows, save each
+      through `saveRule()` / `saveSynonymGroup()` (so BR-6/7/8/10/11 apply exactly as in the CP); a
+      refused row rolls everything back and the command exits 64 naming it. Like every row write it
+      does not push; the command then calls `pushOrQueue()` (BR-4) — a failed push prints "Saved, not
+      live yet" and **exits 1** with the retry queued. Command order: config (78) → file read and
+      `read()` (64, a missing file too) → collection declared (64) → typed handle from the file's
+      `collection` (64) → import → push. Export prints the JSON without `--file`; it and import need no
+      reachable server. 18 new strings. Tests: unit `tests/unit/services/RulesTransferTest.php` (13:
+      a good file read back unchanged, 11 refusals, a user's reference); integration
+      `tests/integration/RulesConsoleTest.php` (5: TS-7 steps 1-4 — uid + slug reference, UTC date,
+      printed export equals the file, a changed uid matched by slug, a deleted entry listed and left
+      out, rows in order with dates and switches, both sets in step, the wrong answer exit 64 with
+      nothing changed; a rule with nothing left listed; TN-11 — malformed, version 2, no version, rules
+      not a list, malformed rule, bad date, malformed group, a row the CP would refuse (rolled back),
+      an undeclared collection, a missing file, all exit 64 with nothing changed, and 78 on bad config
+      for both commands; TN-13 — an editor's late push after an import's, and the reverse, each leave
+      Typesense equal to the stored rows). **Mutation-checked:** no slug fallback fails TS-7; commit
+      instead of rollback fails TN-11. B5 #1 green on 8.2 + 8.4: 255 unit + 150 integration; #2 no
+      output; #3 valid.
 - [ ] **4.2 Adopt and prune** - same console controller, `src/services/RulesTransfer.php`
       Rules: BR-18, BR-21 · Verify: B5 #1, TS-8, TN-10, TN-12
 - [ ] **5.1 Release** - `README.md` (Rules section, uninstall note), `CHANGELOG.md` 1.1.0,
