@@ -18,6 +18,7 @@ use craft\models\Section_SiteSettings;
 use DateTime;
 use Typesense\Client as TypesenseClient;
 use Typesense\Exceptions\ObjectNotFound;
+use webdna\typesensesync\errors\SyncException;
 use webdna\typesensesync\jobs\PushRules;
 use webdna\typesensesync\models\Rule;
 use webdna\typesensesync\models\Settings;
@@ -278,6 +279,45 @@ class RulesTest extends Unit
         $state = $this->rules()->state('content')[Rules::KIND_RULES];
         $this->assertSame(Rules::STATE_NOT_LIVE, $state['state']);
         $this->assertFalse($state['linked']);
+    }
+
+    public function testApplyAndTheNextSavePutCraftsVersionBackOverADashboardEdit(): void
+    {
+        // TS-6, the integration half (BR-14, BR-15); the banner is task 3.2's.
+        $a = $this->indexedEntry('Garden A');
+        $this->saveRule('garden', Rule::MATCH_EXACT, pins: [$a->id]);
+        $this->rules()->push('content');
+        $this->assertFalse($this->rules()->apply('content')['pushed'], 'in step: nothing to push');
+
+        $drifted = ['items' => [['id' => 'rule-0001', 'rule' => ['query' => 'garden', 'match' => 'contains'], 'includes' => [['id' => (string)$a->id, 'position' => 1]]]]];
+        $this->admin->curationSets->upsert($this->prefix . 'content_rules', $drifted);
+
+        $dry = $this->rules()->apply('content', true);
+        $this->assertTrue($dry['pushed']);
+        $this->assertSame(Rules::STATE_OUT_OF_STEP, $dry['sets'][Rules::KIND_RULES]['state']);
+        $this->assertSame(Rules::STATE_IN_STEP, $dry['sets'][Rules::KIND_SYNONYMS]['state']);
+        $this->assertStringContainsString($this->prefix . 'content_rules (1 item differs)', $dry['message']);
+        $this->assertSame('contains', $this->liveItems(Rules::KIND_RULES)[0]['rule']['match'], 'a dry run writes nothing');
+
+        $applied = $this->rules()->apply('content');
+        $this->assertTrue($applied['pushed']);
+        $this->assertSame('exact', $this->liveItems(Rules::KIND_RULES)[0]['rule']['match'], 'Craft wins');
+        $this->assertFalse($this->rules()->apply('content')['pushed'], 'a second apply finds nothing');
+
+        // Step 3: the next save does the same.
+        $this->admin->curationSets->upsert($this->prefix . 'content_rules', $drifted);
+        $this->saveRule('hall', Rule::MATCH_EXACT, pins: [$a->id]);
+        $this->assertNull($this->rules()->pushOrQueue('content'));
+        $this->assertSame(Rules::STATE_IN_STEP, $this->rules()->state('content')[Rules::KIND_RULES]['state']);
+        $this->assertSame('exact', $this->liveItems(Rules::KIND_RULES)[0]['rule']['match']);
+    }
+
+    public function testApplyRefusesWhenTypesenseCannotBeAsked(): void
+    {
+        $this->useSettings($this->settings(values: ['port' => '1', 'connectTimeout' => 1, 'timeout' => 1]));
+
+        $this->expectException(SyncException::class);
+        $this->rules()->apply('content');
     }
 
     public function testAFailedPushKeepsTheEditAndARetryMakesItLive(): void

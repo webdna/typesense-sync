@@ -7,7 +7,9 @@
 
   Test hooks (spec §7): data-collection="<handle>" on each collection row, data-ts-action="<action>"
   on each button; data-ts-section="analytics" on the analytics pane, data-analytics-rule="<handle>"
-  on each rule row, data-ts-analytics="missing|differs|ok" on its state.
+  on each rule row, data-ts-analytics="missing|differs|ok" on its state; data-ts-set="<kind>" on each
+  rule/synonym set row with data-ts-set-state="in-step|not-live|out-of-step|unknown",
+  data-ts-also-linked on the foreign links, data-ts-section="orphans" and data-orphan="<handle>".
 #}
 {% import '_includes/forms.twig' as forms %}
 
@@ -131,11 +133,37 @@
                 {% endif %}
               </td>
             </tr>
+            {% for kind, set in row.sets %}
+              <tr data-ts-set="{{ kind }}" data-ts-set-state="{{ set.state }}">
+                <th scope="row">{{ kind == 'rules' ? 'Rules'|t('typesense-sync') : 'Synonyms'|t('typesense-sync') }}</th>
+                <td>
+                  <code class="light">{{ set.name }}</code>
+                  {% if set.state == 'in-step' %}
+                    <span class="success">{{ 'In step'|t('typesense-sync') }}</span>
+                  {% elseif set.state == 'out-of-step' %}
+                    <span class="warning">{{ 'Out of step: {reason}. Applying puts Craft’s version back.'|t('typesense-sync', {reason: set.description}) }}</span>
+                  {% elseif set.state == 'not-live' %}
+                    <span class="warning">{{ 'Not live yet: {reason}.'|t('typesense-sync', {reason: set.description}) }}</span>
+                  {% else %}
+                    <span class="error">{{ 'Can’t check: {reason}'|t('typesense-sync', {reason: set.description}) }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            {% if row.alsoLinked %}
+              <tr data-ts-also-linked>
+                <th scope="row">{{ 'Also linked'|t('typesense-sync') }}</th>
+                <td>
+                  {% for set in row.alsoLinked %}<code>{{ set }}</code>{{ not loop.last ? ', ' }}{% endfor %}
+                  <p class="light">{{ 'Sets made outside Craft. They stay linked through every apply and rebuild.'|t('typesense-sync') }}</p>
+                </td>
+              </tr>
+            {% endif %}
           </tbody>
         </table>
 
         <div class="flex flex-wrap" style="margin-top: var(--m, 1rem); align-items: flex-start;">
-          {% if row.fieldCount and not diff.upToDate and not diff.needsRecreate %}
+          {% if row.fieldCount and ((not diff.upToDate and not diff.needsRecreate) or row.setsBehind) %}
             <form method="post" accept-charset="UTF-8">
               {{ csrfInput() }}
               {{ actionInput('typesense-sync/utility/apply') }}
@@ -246,4 +274,20 @@
     </div>
   {% endif %}
 
+{% endif %}
+
+{% if orphans %}
+  <div class="pane" data-ts-section="orphans">
+    <h2>{{ 'Rules for undeclared collections'|t('typesense-sync') }}</h2>
+    <p class="light">{{ 'These collections are no longer in config/typesense-sync.php. Their rules and synonyms are kept, not shown and not pushed.'|t('typesense-sync') }}</p>
+    <ul>
+      {% for handle, counts in orphans %}
+        <li data-orphan="{{ handle }}">
+          <strong>{{ handle }}</strong>:
+          {{ '{rules, plural, =1{1 rule} other{# rules}}, {synonyms, plural, =1{1 synonym group} other{# synonym groups}}'|t('typesense-sync', {rules: counts.rules, synonyms: counts.synonyms}) }}
+          <code class="light">php craft typesense-sync/rules/prune {{ handle }} --confirm={{ handle }}</code>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
 {% endif %}

@@ -8,6 +8,7 @@ use craft\helpers\Json;
 use Throwable;
 use webdna\typesensesync\console\Controller;
 use webdna\typesensesync\services\Collections;
+use webdna\typesensesync\services\Rules;
 use yii\console\ExitCode;
 
 /**
@@ -216,19 +217,26 @@ class CollectionsController extends Controller
 
         if (!$diff['exists']) {
             $this->stdout('  ' . Craft::t('typesense-sync', 'not created yet; apply would create {count} fields', ['count' => count($diff['added'])]) . "\n", Console::FG_YELLOW);
-
-            return true;
+        } else {
+            $this->stdout('  ' . Craft::t('typesense-sync', 'alias → {collection}, {count} documents', [
+                'collection' => (string)$diff['collection'],
+                'count' => $diff['documents'],
+            ]) . "\n");
+            $this->schemaStatus($handle, $diff);
         }
 
-        $this->stdout('  ' . Craft::t('typesense-sync', 'alias → {collection}, {count} documents', [
-            'collection' => (string)$diff['collection'],
-            'count' => $diff['documents'],
-        ]) . "\n");
+        return $this->setsStatus($handle, $diff);
+    }
 
+    /**
+     * @param array<string, mixed> $diff
+     */
+    private function schemaStatus(string $handle, array $diff): void
+    {
         if ($diff['upToDate']) {
             $this->stdout('  ' . Craft::t('typesense-sync', 'up to date') . "\n", Console::FG_GREEN);
 
-            return true;
+            return;
         }
 
         foreach ($diff['added'] as $name) {
@@ -256,6 +264,35 @@ class CollectionsController extends Controller
                 'collection' => $handle,
             ]) . "\n", Console::FG_RED);
         }
+    }
+
+    /**
+     * Each owned set's state against Craft's rows, and any set linked that the plugin does not own
+     * (BR-3, BR-14).
+     *
+     * @param array<string, mixed> $diff
+     */
+    private function setsStatus(string $handle, array $diff): bool
+    {
+        try {
+            $states = self::plugin()->rules->state($handle);
+        } catch (Throwable $e) {
+            $this->stderr('  ' . $e->getMessage() . "\n", Console::FG_RED);
+
+            return false;
+        }
+
+        foreach ($states as $row) {
+            $this->stdout('  ' . $row['name'] . ': ' . Rules::describeState($row) . "\n", match ($row['state']) {
+                Rules::STATE_IN_STEP => Console::FG_GREEN,
+                Rules::STATE_UNKNOWN => Console::FG_RED,
+                default => Console::FG_YELLOW,
+            });
+        }
+
+        if ($diff['foreignLinks'] !== []) {
+            $this->stdout('  ' . Craft::t('typesense-sync', 'also linked: {sets}', ['sets' => implode(', ', $diff['foreignLinks'])]) . "\n", Console::FG_GREY);
+        }
 
         return true;
     }
@@ -277,6 +314,9 @@ class CollectionsController extends Controller
         if ($failed) {
             $this->stderr($result['message'] . "\n", Console::FG_RED);
 
+            // The rules do not depend on the schema, so they still go live.
+            $this->applySets($handle, $result['action']);
+
             return false;
         }
 
@@ -292,6 +332,29 @@ class CollectionsController extends Controller
                 'collection' => $handle,
             ]) . "\n", Console::FG_YELLOW);
         }
+
+        return $this->applySets($handle, $result['action']);
+    }
+
+    /**
+     * Push the collection's rule and synonym sets when Typesense's differ from Craft's (BR-15).
+     * Nothing to do where apply left no live collection to search.
+     */
+    private function applySets(string $handle, string $action): bool
+    {
+        if (in_array($action, [Collections::ACTION_SKIP, Collections::ACTION_BLOCKED], true)) {
+            return true;
+        }
+
+        try {
+            $result = self::plugin()->rules->apply($handle, $this->dryRun);
+        } catch (Throwable $e) {
+            $this->stderr('  ' . $e->getMessage() . "\n", Console::FG_RED);
+
+            return false;
+        }
+
+        $this->stdout('  ' . $result['message'] . "\n", $result['pushed'] ? Console::FG_GREEN : Console::FG_GREY);
 
         return true;
     }

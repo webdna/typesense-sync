@@ -25,6 +25,8 @@ use webdna\typesensesync\helpers\Commerce;
 use webdna\typesensesync\jobs\Reindex;
 use webdna\typesensesync\jobs\SyncElement;
 use webdna\typesensesync\models\Settings;
+use webdna\typesensesync\records\RuleRecord;
+use webdna\typesensesync\records\SynonymRecord;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\NotAFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\RefusingFormatter;
@@ -149,6 +151,30 @@ class ConsoleTest extends Unit
         $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
         $this->assertStringContainsString('is up to date', $run['out']);
         $this->assertSame(1, $this->countDocuments());
+    }
+
+    public function testSetupOnAFreshInstallMakesAndLinksTheEmptySets(): void
+    {
+        // Regression row 3, BR-1, BR-15: no rules yet, both sets still made and linked, exit 0.
+        Db::delete(RuleRecord::TABLE);
+        Db::delete(SynonymRecord::TABLE);
+
+        $run = $this->command('setup', ['skipSync' => true]);
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertStringContainsString('Rules and synonyms', $run['out']);
+        $this->assertStringContainsString('content: Rules and synonyms in step.', $run['out']);
+
+        $schema = $this->admin->collections[$this->prefix . 'content_1']->retrieve();
+        $this->assertSame([$this->prefix . 'content_rules'], $schema['curation_sets']);
+        $this->assertSame([$this->prefix . 'content_synonyms'], $schema['synonym_sets']);
+        $this->assertSame([], $this->admin->curationSets[$this->prefix . 'content_rules']->retrieve()['items']);
+
+        // A set deleted behind setup's back is made again by the next run (BR-15).
+        $this->admin->collections[$this->prefix . 'content_1']->update(['synonym_sets' => []]);
+        $this->admin->synonymSets[$this->prefix . 'content_synonyms']->delete();
+        $run = $this->command('setup', ['skipSync' => true]);
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertSame([$this->prefix . 'content_synonyms'], $this->admin->collections[$this->prefix . 'content_1']->retrieve()['synonym_sets']);
     }
 
     public function testSetupRefusesAConfigProblemAndCreatesNothing(): void
@@ -379,6 +405,45 @@ class ConsoleTest extends Unit
         $this->assertStringContainsString("Linked $rules to {$this->prefix}content_1.", $run['out']);
         $this->assertStringNotContainsString('typesense-sync/sync', $run['out']);
         $this->assertStringContainsString('up to date', $this->command('collections/status')['out']);
+    }
+
+    public function testStatusReportsADriftedSetAndApplyPutsCraftsVersionBack(): void
+    {
+        // TS-6's integration half from the console (BR-14, BR-15), and BR-3's foreign link.
+        Db::delete(RuleRecord::TABLE);
+        Db::delete(SynonymRecord::TABLE);
+        $this->assertSame(ExitCode::OK, $this->command('collections/apply')['exit']);
+        $rules = $this->prefix . 'content_rules';
+        $synonyms = $this->prefix . 'content_synonyms';
+
+        $run = $this->command('collections/status');
+        $this->assertStringContainsString("$rules: in step", $run['out']);
+        $this->assertStringContainsString("$synonyms: in step", $run['out']);
+        $this->assertStringNotContainsString('also linked', $run['out']);
+
+        $this->admin->synonymSets->upsert($synonyms, ['items' => [['id' => 'synonym-0001', 'synonyms' => ['a', 'b']]]]);
+        $extra = $this->prefix . 'extra';
+        $this->admin->curationSets->upsert($extra, ['items' => []]);
+        $this->admin->collections[$this->prefix . 'content_1']->update(['curation_sets' => [$rules, $extra]]);
+
+        $run = $this->command('collections/status');
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertStringContainsString("$synonyms: 1 item differs", $run['out']);
+        $this->assertStringContainsString("also linked: $extra", $run['out']);
+
+        $run = $this->command('collections/apply', ['dryRun' => true]);
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertStringContainsString("Would push $synonyms (1 item differs).", $run['out']);
+        $this->assertCount(1, $this->admin->synonymSets[$synonyms]->retrieve()['items'], '--dry-run writes nothing');
+
+        $run = $this->command('collections/apply');
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertStringContainsString("Pushed $synonyms (1 item differs).", $run['out']);
+        $this->assertSame([], $this->admin->synonymSets[$synonyms]->retrieve()['items']);
+        $this->assertSame([$rules, $extra], $this->admin->collections[$this->prefix . 'content_1']->retrieve()['curation_sets'], 'apply never drops a foreign link');
+
+        $run = $this->command('collections/apply');
+        $this->assertStringContainsString('Rules and synonyms in step.', $run['out']);
     }
 
     public function testApplyRefusesAConfigProblemAndAnUndeclaredCollection(): void

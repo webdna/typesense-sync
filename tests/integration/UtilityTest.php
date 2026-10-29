@@ -29,7 +29,12 @@ use webdna\typesensesync\helpers\Commerce;
 use webdna\typesensesync\jobs\Recreate;
 use webdna\typesensesync\jobs\Reindex;
 use webdna\typesensesync\jobs\SyncElement;
+use webdna\typesensesync\models\Rule;
 use webdna\typesensesync\models\Settings;
+use webdna\typesensesync\models\SynonymGroup;
+use webdna\typesensesync\records\RuleRecord;
+use webdna\typesensesync\records\SynonymRecord;
+use webdna\typesensesync\services\Rules;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\WiderFormatter;
 use webdna\typesensesync\tests\fixtures\MockedClient;
@@ -78,6 +83,8 @@ class UtilityTest extends Unit
         Craft::$app->edition = CmsEdition::Pro;
         Craft::$app->getProjectConfig()->writeYamlAutomatically = false;
         Craft::$app->getCache()->flush();
+        Db::delete(RuleRecord::TABLE);
+        Db::delete(SynonymRecord::TABLE);
 
         $this->news = $this->createSection('news');
         $this->private = $this->createSection('private');
@@ -88,6 +95,8 @@ class UtilityTest extends Unit
 
     protected function _after(): void
     {
+        Db::delete(RuleRecord::TABLE);
+        Db::delete(SynonymRecord::TABLE);
         TestCollections::deleteAll($this->admin, $this->prefix);
         $this->plugin->targets->setSettings(null);
         $this->plugin->client->setClient(null);
@@ -381,6 +390,81 @@ class UtilityTest extends Unit
 
         // BR-17: the admin key is nowhere on the page.
         $this->assertStringNotContainsString((string)getenv('TYPESENSE_TEST_API_KEY'), $html);
+    }
+
+    public function testEachSetShowsItsStateAndApplyPutsCraftsVersionBack(): void
+    {
+        // TS-6 through the utility (BR-14, BR-15); BR-3's "also linked".
+        $user = $this->user(['accessCp', Utility::PERMISSION]);
+        Craft::$app->getUser()->setIdentity($user);
+        $this->plugin->collections->apply('content');
+        $rules = $this->prefix . 'content_rules';
+
+        $html = $this->render();
+        $this->assertStringContainsString('data-ts-set="rules" data-ts-set-state="in-step"', $html);
+        $this->assertStringContainsString('data-ts-set="synonyms" data-ts-set-state="in-step"', $html);
+        $this->assertStringNotContainsString('data-ts-action="apply"', $html);
+        $this->assertStringNotContainsString('data-ts-also-linked', $html);
+
+        // Edited in the dashboard, and a hand-made set linked beside it.
+        $this->admin->curationSets->upsert($rules, ['items' => [['id' => 'rule-0001', 'rule' => ['query' => 'x', 'match' => 'exact'], 'excludes' => [['id' => 'x']]]]]);
+        $extra = $this->prefix . 'extra';
+        $this->admin->curationSets->upsert($extra, ['items' => []]);
+        $this->admin->collections[$this->prefix . 'content_1']->update(['curation_sets' => [$rules, $extra]]);
+
+        $row = Utility::variables()['collections'][0];
+        $this->assertSame(Rules::STATE_OUT_OF_STEP, $row['sets'][Rules::KIND_RULES]['state']);
+        $this->assertTrue($row['setsBehind']);
+        $this->assertSame([$extra], $row['alsoLinked']);
+        $html = $this->render();
+        $this->assertStringContainsString('data-ts-set="rules" data-ts-set-state="out-of-step"', $html);
+        $this->assertStringContainsString('1 item differs', $html);
+        $this->assertStringContainsString('data-ts-action="apply"', $html, 'schema up to date, but the set needs applying');
+        $this->assertStringContainsString('data-ts-also-linked', $html);
+        $this->assertStringContainsString($extra, $html);
+
+        $applied = $this->post('apply', ['collection' => 'content'], $user);
+        $this->assertSame(200, $applied->getStatusCode(), (string)json_encode($applied->data));
+        $this->assertStringContainsString('Pushed ' . $rules, (string)json_encode($applied->data, JSON_UNESCAPED_SLASHES));
+
+        $this->assertSame([], $this->admin->curationSets[$rules]->retrieve()['items'], 'Craft holds no rules, so neither does Typesense');
+        $this->assertSame([$rules, $extra], $this->admin->collections[$this->prefix . 'content_1']->retrieve()['curation_sets'], 'the foreign link is kept');
+        $html = $this->render();
+        $this->assertStringContainsString('data-ts-set="rules" data-ts-set-state="in-step"', $html);
+        $this->assertStringNotContainsString('data-ts-action="apply"', $html);
+    }
+
+    public function testRowsForAnUndeclaredCollectionAreListedAsOrphaned(): void
+    {
+        // TN-10, BR-21: kept, not shown with the collections, named in the utility in every state.
+        foreach (['gone' => 2, 'content' => 1] as $collection => $count) {
+            for ($i = 1; $i <= $count; $i++) {
+                $record = new RuleRecord();
+                (new Rule(['collection' => $collection, 'sortOrder' => $i, 'query' => "q$i", 'matchType' => Rule::MATCH_EXACT, 'pins' => [1]]))->populateRecord($record);
+                $record->save(false);
+            }
+        }
+
+        $record = new SynonymRecord();
+        (new SynonymGroup(['collection' => 'old', 'sortOrder' => 1, 'words' => ['a', 'b']]))->populateRecord($record);
+        $record->save(false);
+
+        $expected = ['gone' => ['rules' => 2, 'synonyms' => 0], 'old' => ['rules' => 0, 'synonyms' => 1]];
+        $this->assertSame($expected, $this->plugin->rules->orphans());
+
+        $variables = Utility::variables();
+        $this->assertSame($expected, $variables['orphans']);
+        $this->assertSame(['content'], array_column($variables['collections'], 'handle'));
+
+        $html = $this->render();
+        $this->assertStringContainsString('data-orphan="gone"', $html);
+        $this->assertStringContainsString('2 rules, 0 synonym groups', $html);
+        $this->assertStringContainsString('data-orphan="old"', $html);
+        $this->assertStringContainsString('typesense-sync/rules/prune gone --confirm=gone', $html);
+        $this->assertStringNotContainsString('data-orphan="content"', $html);
+
+        $this->useSettings($this->settings(['host' => '']));
+        $this->assertStringContainsString('data-orphan="gone"', $this->render(), 'listed while unconfigured too');
     }
 
     public function testAConfigProblemIsListedAndAFailingCollectionDoesNotBreakThePage(): void

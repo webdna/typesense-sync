@@ -114,8 +114,9 @@ class UtilityController extends Controller
     }
 
     /**
-     * Create the collection, or alter it in place to match the declared schema (BR-16). Runs in
-     * the request: it is one call to the server, and never reindexes.
+     * Create the collection, or alter it in place to match the declared schema (BR-16), then push
+     * its rule and synonym sets where Typesense's differ from Craft's (BR-15). Runs in the
+     * request: a few small calls to the server, never a reindex.
      */
     public function actionApply(): ?Response
     {
@@ -136,14 +137,32 @@ class UtilityController extends Controller
             ]));
         }
 
+        // The rule and synonym sets go live with the schema, Craft's version over Typesense's (BR-15).
+        $sets = null;
+
+        if (!in_array($result['action'], [Collections::ACTION_SKIP, Collections::ACTION_BLOCKED], true)) {
+            try {
+                $sets = self::plugin()->rules->apply($handle);
+            } catch (Throwable $e) {
+                Craft::error(sprintf('Pushing the rules of "%s" failed: %s', $handle, $e->getMessage()), TypesenseSync::HANDLE);
+
+                return $this->asFailure(Craft::t('typesense-sync', 'Could not push the rules and synonyms of “{collection}”: {message}', [
+                    'collection' => $handle,
+                    'message' => $e->getMessage(),
+                ]));
+            }
+        }
+
         $params = ['collection' => $handle, 'name' => (string)$result['collection']];
+        $pushed = $sets !== null && $sets['pushed'] ? $sets['message'] : null;
+        $then = $pushed !== null ? ' ' . $pushed : '';
 
         return match ($result['action']) {
-            Collections::ACTION_CREATE => $this->asSuccess(Craft::t('typesense-sync', 'Created {name} for “{collection}”. Reindex it to fill it.', $params)),
-            Collections::ACTION_ALTER => $this->asSuccess($result['reindex']
+            Collections::ACTION_CREATE => $this->asSuccess(Craft::t('typesense-sync', 'Created {name} for “{collection}”. Reindex it to fill it.', $params) . $then),
+            Collections::ACTION_ALTER => $this->asSuccess(($result['reindex']
                 ? Craft::t('typesense-sync', 'Altered {name}. Reindex “{collection}” so every document has the new fields.', $params)
-                : Craft::t('typesense-sync', 'Altered {name}.', $params)),
-            Collections::ACTION_NONE => $this->asSuccess(Craft::t('typesense-sync', '“{collection}” is already up to date.', $params)),
+                : Craft::t('typesense-sync', 'Altered {name}.', $params)) . $then),
+            Collections::ACTION_NONE => $this->asSuccess($pushed ?? Craft::t('typesense-sync', '“{collection}” is already up to date.', $params)),
             Collections::ACTION_SKIP => $this->asFailure(Craft::t('typesense-sync', 'Nothing enabled is declared to feed “{collection}”, so there is no schema to apply.', $params)),
             Collections::ACTION_NEEDS_RECREATE => $this->asFailure(Craft::t('typesense-sync', '“{collection}” cannot be altered in place. Recreate it instead.', $params)),
             default => $this->asFailure(Craft::t('typesense-sync', 'Could not apply “{collection}”: {message}', [

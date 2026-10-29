@@ -219,6 +219,37 @@ class Rules extends Component
         }
     }
 
+    /**
+     * Rows kept for collections the config no longer declares (BR-21): neither shown in the section
+     * nor pushed, and deleted only by `rules/prune`.
+     *
+     * @return array<string, array{rules: int, synonyms: int}> By collection handle, sorted.
+     */
+    public function orphans(): array
+    {
+        $declared = array_keys(TypesenseSync::getInstance()->targets->getSettings()->getCollectionConfigs());
+        $orphans = [];
+
+        foreach ([self::KIND_RULES => RuleRecord::class, self::KIND_SYNONYMS => SynonymRecord::class] as $kind => $class) {
+            $counts = $class::find()
+                ->select(['collection', 'count' => 'COUNT(*)'])
+                ->where(['not in', 'collection', $declared])
+                ->groupBy(['collection'])
+                ->asArray()
+                ->all();
+
+            foreach ($counts as $count) {
+                $handle = (string)$count['collection'];
+                $orphans[$handle] ??= [self::KIND_RULES => 0, self::KIND_SYNONYMS => 0];
+                $orphans[$handle][$kind] = (int)$count['count'];
+            }
+        }
+
+        ksort($orphans);
+
+        return $orphans;
+    }
+
     // What Typesense is sent ---------------------------------------------------------------------
 
     /**
@@ -292,6 +323,64 @@ class Rules extends Component
 
             return $e->getMessage();
         }
+    }
+
+    /**
+     * Bring Typesense into line with Craft for one collection (BR-14, BR-15): when either set is
+     * missing, unlinked or changed outside Craft, push both. Typesense's version is never kept.
+     * A dry run makes the same decision and writes nothing.
+     *
+     * @return array{pushed: bool, sets: array<string, array{state: string, name: string, exists: bool, linked: bool, differs: int, message: ?string}>, message: string}
+     * `pushed` is whether a push was (or, in a dry run, would be) sent; `sets` is each kind's
+     * state before it.
+     * @throws SyncException when Typesense cannot be asked or refuses the push.
+     * @throws InvalidConfigException when the collection is undeclared.
+     */
+    public function apply(string $collection, bool $dryRun = false): array
+    {
+        $states = $this->state($collection);
+
+        foreach ($states as $row) {
+            if ($row['state'] === self::STATE_UNKNOWN) {
+                throw new SyncException((string)$row['message']);
+            }
+        }
+
+        $behind = array_filter($states, static fn(array $row) => $row['state'] !== self::STATE_IN_STEP);
+
+        if ($behind === []) {
+            return ['pushed' => false, 'sets' => $states, 'message' => Craft::t('typesense-sync', 'Rules and synonyms in step.')];
+        }
+
+        $sets = implode(', ', array_map(static fn(array $row) => $row['name'] . ' (' . self::describeState($row) . ')', $behind));
+
+        if (!$dryRun) {
+            $this->push($collection);
+        }
+
+        return [
+            'pushed' => true,
+            'sets' => $states,
+            'message' => $dryRun
+                ? Craft::t('typesense-sync', 'Would push {sets}.', ['sets' => $sets])
+                : Craft::t('typesense-sync', 'Pushed {sets}.', ['sets' => $sets]),
+        ];
+    }
+
+    /**
+     * Why a set is not in step, in a few words: missing, not linked, or how many items differ.
+     *
+     * @param array{state: string, exists: bool, linked: bool, differs: int, message: ?string} $row One kind from state().
+     */
+    public static function describeState(array $row): string
+    {
+        return match (true) {
+            $row['state'] === self::STATE_UNKNOWN => (string)$row['message'],
+            $row['state'] === self::STATE_IN_STEP => Craft::t('typesense-sync', 'in step'),
+            !$row['exists'] => Craft::t('typesense-sync', 'missing'),
+            !$row['linked'] => Craft::t('typesense-sync', 'not linked'),
+            default => Craft::t('typesense-sync', '{count, plural, =1{1 item differs} other{# items differ}}', ['count' => $row['differs']]),
+        };
     }
 
     /**

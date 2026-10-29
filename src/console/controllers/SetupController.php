@@ -12,8 +12,8 @@ use yii\console\ExitCode;
 /**
  * Sets up a Typesense server for this site from nothing.
  *
- * Checks the config and the connection, creates or alters every declared collection and analytics
- * rule, and indexes their content. Safe to run again: apply changes only what differs, and indexing upserts.
+ * Checks the config and the connection, creates or alters every declared collection, pushes its
+ * rules and synonyms, applies any analytics rules, and indexes their content. Safe to run again: apply changes only what differs, and indexing upserts.
  *
  * @since 1.0.0
  */
@@ -32,8 +32,8 @@ class SetupController extends Controller
     }
 
     /**
-     * Check the config and connection, apply every collection and any analytics rules, then
-     * index their content.
+     * Check the config and connection, apply every collection with its rules and synonyms, and any
+     * analytics rules, then index their content.
      *
      * Refuses, changing nothing, on a config problem, an unreachable server or one older than
      * 30.0, or a search-only key that allows more than search.
@@ -64,6 +64,7 @@ class SetupController extends Controller
         $this->stdout("\n" . Craft::t('typesense-sync', 'Collections') . "\n", Console::BOLD);
         $ok = true;
         $live = [];
+        $searchable = [];
 
         foreach ($handles as $handle) {
             try {
@@ -83,6 +84,25 @@ class SetupController extends Controller
                 $ok = false;
             } elseif ($result['action'] !== Collections::ACTION_SKIP) {
                 $live[] = $handle;
+            }
+
+            if (!in_array($result['action'], [Collections::ACTION_SKIP, Collections::ACTION_BLOCKED], true)) {
+                $searchable[] = $handle;
+            }
+        }
+
+        // Every searchable collection gets its sets, empty ones too (BR-1, BR-15).
+        if ($searchable !== []) {
+            $this->stdout("\n" . Craft::t('typesense-sync', 'Rules and synonyms') . "\n", Console::BOLD);
+
+            foreach ($searchable as $handle) {
+                try {
+                    $result = self::plugin()->rules->apply($handle);
+                    $this->stdout("  $handle: " . $result['message'] . "\n", $result['pushed'] ? Console::FG_GREEN : Console::FG_GREY);
+                } catch (Throwable $e) {
+                    $this->stderr("  $handle: " . $e->getMessage() . "\n", Console::FG_RED);
+                    $ok = false;
+                }
             }
         }
 

@@ -6,6 +6,7 @@ use Craft;
 use craft\base\Utility as BaseUtility;
 use Throwable;
 use webdna\typesensesync\services\Client;
+use webdna\typesensesync\services\Rules;
 use webdna\typesensesync\TypesenseSync;
 
 /**
@@ -52,7 +53,10 @@ class Utility extends BaseUtility
      *
      * `state` is one of `unconfigured` (no host or admin key), `unreachable` (the server did not
      * answer, or is older than 30.0), `empty` (connected, nothing declared) or `ready`. Once
-     * `ready`, `analytics` holds each declared rule's state, or null while analytics is off.
+     * `ready`, `analytics` holds each declared rule's state, or null while analytics is off, and
+     * each collection its rule and synonym sets' states (`sets`, BR-14) and the sets linked to it
+     * that the plugin does not own (`alsoLinked`, BR-3). `orphans` counts the rows kept for
+     * collections no longer declared (BR-21), in every state.
      *
      * @return array<string, mixed>
      */
@@ -70,7 +74,15 @@ class Utility extends BaseUtility
             'warnings' => $settings->getWarnings(),
             'collections' => [],
             'analytics' => null,
+            'orphans' => [],
         ];
+
+        // Read from Craft's own tables, so listed whatever the connection (BR-21).
+        try {
+            $variables['orphans'] = $plugin->rules->orphans();
+        } catch (Throwable $e) {
+            Craft::warning(sprintf('Could not list orphaned rules: %s', $e->getMessage()), TypesenseSync::HANDLE);
+        }
 
         if (!$settings->isConfigured()) {
             return $variables;
@@ -141,6 +153,9 @@ class Utility extends BaseUtility
             'fieldCount' => 0,
             'diff' => null,
             'dependants' => [],
+            'sets' => [],
+            'setsBehind' => false,
+            'alsoLinked' => [],
             'error' => null,
         ];
 
@@ -148,10 +163,18 @@ class Utility extends BaseUtility
             $row['fieldCount'] = count($plugin->collections->getDesiredFields($handle));
             $row['diff'] = $plugin->collections->diff($handle);
             $row['dependants'] = $plugin->collections->getDependants($handle);
+            $row['alsoLinked'] = $row['diff']['foreignLinks'];
         } catch (Throwable $e) {
             // A field conflict, a failing formatter or a cycle shows on its own row, not as an
             // error page.
             $row['error'] = $e->getMessage();
+        }
+
+        try {
+            $row['sets'] = array_map(fn(array $set) => $set + ['description' => Rules::describeState($set)], $plugin->rules->state($handle));
+            $row['setsBehind'] = array_filter($row['sets'], fn(array $set) => in_array($set['state'], [Rules::STATE_NOT_LIVE, Rules::STATE_OUT_OF_STEP], true)) !== [];
+        } catch (Throwable $e) {
+            $row['error'] ??= $e->getMessage();
         }
 
         return $row;

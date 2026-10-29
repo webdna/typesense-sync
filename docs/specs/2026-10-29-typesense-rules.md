@@ -555,10 +555,37 @@ proven before any screen writes rules.
       state test now starts in step (apply made the empty sets). **BR-2 mutation-checked** on TS-5
       step 2: links not carried, and no lists at all, each fail. B5 #1 green on 8.2 + 8.4: 242 unit +
       116 integration; #2 no output; #3 valid.
-- [ ] **2.2 Apply, status, setup, utility** - `src/console/controllers/CollectionsController.php`,
+- [x] **2.2 Apply, status, setup, utility** - `src/console/controllers/CollectionsController.php`,
       `SetupController.php`, `src/utilities/Utility.php`, `src/templates/_utility.twig`,
       `src/controllers/UtilityController.php`
       Rules: BR-14, BR-15, BR-21 · Verify: B5 #1, TS-6 (integration half), TN-10, regression row 3
+      *As built (29 Oct):* the one decision lives in `Rules::apply(collection, dryRun)` →
+      `{pushed, sets, message}`: reads `state()`, throws `SyncException` on *unknown*, and when either
+      set is not in step pushes **both** (`push()`, so Craft's version wins); a dry run decides the
+      same and writes nothing. `Rules::describeState(row)` is the few words for a set (*in step*,
+      *missing*, *not linked*, *N items differ*, or the unknown reason) used by status, apply's
+      message and the utility. `Rules::orphans()` → `handle => {rules, synonyms}` for rows whose
+      collection is not declared (a `NOT IN` over both tables, sorted). Callers run the rules step
+      after the schema for every result except `skip` / `blocked` — `needs-recreate` too, since the
+      sets do not depend on the schema: `collections/apply` prints it under each collection (exit
+      unchanged), `setup` has a **Rules and synonyms** step between Collections and Analytics, and
+      the utility's Apply appends "Pushed …" to its notice (or says only that, for an up-to-date
+      schema). `collections/status` prints each set's line and `also linked: …` from
+      `diff()['foreignLinks']`. Utility rows gain `sets` (each with `description`), `setsBehind`
+      (not live / out of step only — *unknown* offers no button) and `alsoLinked`; the Apply button
+      now also shows when the schema is up to date but a set is behind. `orphans` is read in every
+      state, unconfigured included, and rendered last with the `rules/prune` command (built in 4.2).
+      Template hooks: `data-ts-set` / `data-ts-set-state`, `data-ts-also-linked`,
+      `data-ts-section="orphans"`, `data-orphan`. 20 new strings. Tests: integration `RulesTest`
+      (+2: TS-6 dry run / apply / second apply finds nothing / step 3 "the next save" via
+      `pushOrQueue()`; apply refuses an unreachable server), `UtilityTest` (+2: state rows, also
+      linked, Apply restores Craft's set keeping the foreign link; TN-10 orphans listed, not among the
+      collections, still listed unconfigured), `ConsoleTest` (+2: status drift line, also linked,
+      dry run writes nothing, apply pushes, second apply in step; regression row 3 — setup on a fresh
+      install makes and links both empty sets, exit 0, and remakes a deleted one). TN-10's *section
+      hides it* is 3.1's and *prune deletes* is 4.2's. Mutation-checked: no push in `apply()` fails
+      all three TS-6 tests. B5 #1 green on 8.2 + 8.4: 242 unit + 122 integration; #2 no output; #3
+      valid.
 - [ ] **3.1 Section and permission** - `src/TypesenseSync.php` (CP nav, URL rules, permission),
       `src/controllers/RulesController.php`, `src/controllers/SynonymsController.php`
       Rules: BR-4, BR-13, BR-19 · Verify: B5 #1, TS-9, TN-1, TN-14
