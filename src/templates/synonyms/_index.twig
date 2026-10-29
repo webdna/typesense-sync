@@ -29,7 +29,8 @@
         columns: [
           {name: '__slot:title', title: {{ 'Words'|t('typesense-sync')|json_encode|raw }}},
           {name: 'type', title: {{ 'Type'|t('typesense-sync')|json_encode|raw }}},
-          {name: 'words', title: {{ 'Finds'|t('typesense-sync')|json_encode|raw }}},
+          // The table renders a column as HTML; these are an editor's own words.
+          {name: 'words', title: {{ 'Finds'|t('typesense-sync')|json_encode|raw }}, callback: (value) => Craft.escapeHtml(value)},
           {
             name: 'status',
             title: {{ 'Status'|t('typesense-sync')|json_encode|raw }},
