@@ -1,0 +1,11 @@
+{# BR-19: no section without a connection; the utility's message. #}
+{% extends '_layouts/cp' %}
+
+{% set title = 'Typesense'|t('typesense-sync') %}
+
+{% block content %}
+  <p data-ts-section="unconfigured">
+    {{ 'Typesense Sync is not connected.'|t('typesense-sync') }}
+    <a href="{{ cpUrl(settingsUrl) }}">{{ 'Enter the server details in its settings.'|t('typesense-sync') }}</a>
+  </p>
+{% endblock %}

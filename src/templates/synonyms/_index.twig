@@ -1,0 +1,10 @@
+{# A collection's Synonyms tab. Task 3.2 makes this the admin table. #}
+{% extends 'typesense-sync/_section/layout.twig' %}
+
+{% block content %}
+  <ol data-ts-synonyms>
+    {% for group in groups %}
+      <li data-id="{{ group.id }}"><a href="{{ cpUrl(sectionUri ~ '/' ~ collection ~ '/synonyms/' ~ group.id) }}">{{ group.words|join(', ') }}</a></li>
+    {% endfor %}
+  </ol>
+{% endblock %}

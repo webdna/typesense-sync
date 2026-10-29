@@ -10,12 +10,18 @@ use craft\base\Plugin;
 use craft\elements\User;
 use craft\events\DefineMenuItemsEvent;
 use craft\events\RegisterComponentTypesEvent;
+use craft\events\RegisterCpNavItemsEvent;
 use craft\events\RegisterElementActionsEvent;
+use craft\events\RegisterUrlRulesEvent;
+use craft\events\RegisterUserPermissionsEvent;
 use craft\events\UserEvent;
 use craft\events\UserGroupsAssignEvent;
+use craft\services\UserPermissions;
 use craft\services\Users;
 use craft\services\Utilities;
+use craft\web\twig\variables\Cp;
 use craft\web\twig\variables\CraftVariable;
+use craft\web\UrlManager;
 use Throwable;
 use webdna\typesensesync\elements\actions\Sync as SyncAction;
 use webdna\typesensesync\models\Settings;
@@ -56,6 +62,18 @@ class TypesenseSync extends Plugin
      */
     public const HANDLE = 'typesense-sync';
 
+    /**
+     * The one permission behind the Typesense section: its nav item, every screen and every
+     * action (BR-13). Admins always have it.
+     */
+    public const PERMISSION_RULES = 'typesense-sync:manageRules';
+
+    /**
+     * The section's first URL segment. Not the plugin handle: Craft gates a path starting with a
+     * plugin's handle on its own `accessPlugin-*` permission, which would be a second one.
+     */
+    public const SECTION_URI = 'typesense';
+
     public string $schemaVersion = '1.1.0';
 
     public bool $hasCpSettings = true;
@@ -94,8 +112,72 @@ class TypesenseSync extends Plugin
             $event->types[] = Utility::class;
         });
 
+        $this->registerSection();
+
         // Once every plugin has loaded, so their EVENT_REGISTER_ELEMENT_TYPES handlers count.
         Craft::$app->onInit(fn() => $this->followElementTypes());
+    }
+
+    /**
+     * The Typesense CP section (BR-13, BR-19). It is not Craft's `hasCpSection`, which would add
+     * an `accessPlugin-typesense-sync` permission beside `manageRules`; the nav item is added
+     * here and shown only to holders of the one permission while the connection is configured.
+     * The controllers check the permission again on every request.
+     */
+    private function registerSection(): void
+    {
+        Event::on(UserPermissions::class, UserPermissions::EVENT_REGISTER_PERMISSIONS, function(RegisterUserPermissionsEvent $event): void {
+            $event->permissions[] = [
+                'heading' => Craft::t('typesense-sync', 'Typesense Sync'),
+                'permissions' => [
+                    self::PERMISSION_RULES => ['label' => Craft::t('typesense-sync', 'Manage Typesense rules')],
+                ],
+            ];
+        });
+
+        Event::on(Cp::class, Cp::EVENT_REGISTER_CP_NAV_ITEMS, function(RegisterCpNavItemsEvent $event): void {
+            if (($item = $this->sectionNavItem()) === null) {
+                return;
+            }
+
+            // Beside the plugins' own sections: before Utilities, Settings and the Plugin Store.
+            $at = array_search('utilities', array_column($event->navItems, 'url'), true);
+            array_splice($event->navItems, $at === false ? count($event->navItems) : (int)$at, 0, [$item]);
+        });
+
+        Event::on(UrlManager::class, UrlManager::EVENT_REGISTER_CP_URL_RULES, function(RegisterUrlRulesEvent $event): void {
+            $base = self::SECTION_URI . '/<collection:[^\/]+>';
+
+            $event->rules[self::SECTION_URI] = 'typesense-sync/rules/collections';
+            $event->rules[$base] = 'typesense-sync/rules/collection';
+
+            foreach (['rules' => 'ruleId', 'synonyms' => 'groupId'] as $kind => $id) {
+                $event->rules["$base/$kind"] = "typesense-sync/$kind/index";
+                $event->rules["$base/$kind/new"] = "typesense-sync/$kind/edit";
+                $event->rules["$base/$kind/<$id:\d+>"] = "typesense-sync/$kind/edit";
+            }
+        });
+    }
+
+    /**
+     * The section's nav item, or null for someone without the permission (BR-13) or while the
+     * connection is not configured (BR-19).
+     *
+     * @return array{label: string, url: string, icon: string}|null
+     */
+    public function sectionNavItem(): ?array
+    {
+        $user = Craft::$app->getUser();
+
+        if ($user->getIsGuest() || !$user->checkPermission(self::PERMISSION_RULES) || !$this->targets->getSettings()->isConfigured()) {
+            return null;
+        }
+
+        return [
+            'label' => Craft::t('typesense-sync', 'Typesense'),
+            'url' => self::SECTION_URI,
+            'icon' => 'magnifying-glass',
+        ];
     }
 
     /**

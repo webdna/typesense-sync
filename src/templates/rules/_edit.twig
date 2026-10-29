@@ -1,0 +1,6 @@
+{# Rule edit. Task 3.2 builds the form. #}
+{% extends 'typesense-sync/_section/layout.twig' %}
+
+{% block content %}
+  <h2>{{ rule.id ? rule.query : 'New rule'|t('typesense-sync') }}</h2>
+{% endblock %}

@@ -1,0 +1,11 @@
+{# A collection's page: its tabs, Rules and Synonyms. Task 3.2 adds the state banner and the switcher. #}
+{% extends '_layouts/cp' %}
+
+{% set title = 'Typesense'|t('typesense-sync') %}
+{% set docTitle = collection ~ ' - ' ~ title %}
+{% set crumbs = collections|length > 1 ? [{label: title, url: cpUrl(sectionUri)}] : [] %}
+{% set tabs = {
+  rules: {label: 'Rules'|t('typesense-sync'), url: cpUrl(sectionUri ~ '/' ~ collection ~ '/rules')},
+  synonyms: {label: 'Synonyms'|t('typesense-sync'), url: cpUrl(sectionUri ~ '/' ~ collection ~ '/synonyms')},
+} %}
+{% set selectedTab = kind %}

@@ -586,9 +586,42 @@ proven before any screen writes rules.
       hides it* is 3.1's and *prune deletes* is 4.2's. Mutation-checked: no push in `apply()` fails
       all three TS-6 tests. B5 #1 green on 8.2 + 8.4: 242 unit + 122 integration; #2 no output; #3
       valid.
-- [ ] **3.1 Section and permission** - `src/TypesenseSync.php` (CP nav, URL rules, permission),
+- [x] **3.1 Section and permission** - `src/TypesenseSync.php` (CP nav, URL rules, permission),
       `src/controllers/RulesController.php`, `src/controllers/SynonymsController.php`
       Rules: BR-4, BR-13, BR-19 · Verify: B5 #1, TS-9, TN-1, TN-14
+      *As built (29 Oct):* **not Craft's `hasCpSection`** — it registers an `accessPlugin-typesense-sync`
+      permission beside ours, and `web\Application` 403s any CP path whose first segment is a plugin
+      handle without it; so the URL segment is `typesense` (`TypesenseSync::SECTION_URI`), the nav
+      item comes from `Cp::EVENT_REGISTER_CP_NAV_ITEMS` (spliced in before Utilities) via the public
+      `sectionNavItem()` (null for a guest, without `PERMISSION_RULES`, or unconfigured), and the
+      permission is registered under the heading *Typesense Sync*. CP URL rules: `typesense` →
+      `rules/collections` (one collection redirects to its Rules tab, several list with counts +
+      state, none says so and links the utility), `typesense/<collection>` → its Rules tab,
+      `…/rules`, `…/rules/new`, `…/rules/<ruleId>` and the same for `synonyms` (`<groupId>`). The
+      shared base is `src/web/SectionController.php` (outside `controllers/` so it is no route):
+      `beforeAction` = CP + permission (403) + POST for all but `SCREENS`; `delete`, `reorder` (ids
+      as a list or the admin table's JSON string), `toggle` (flips unless `enabled` posted) live
+      there; `goLive()` is BR-4 — `pushOrQueue()` after the write, JSON `live: bool`, the message
+      "Saved, not live yet: <reason>" as an error-type notice; `requireCollection()` / `requireRow()`
+      404 an undeclared collection (TN-10's section half); `tabVariables()` = `collection`,
+      `collections`, `kind`, `state` (from `Rules::state()`, any throw read as *unknown*, BR-19),
+      `sectionUri` — **3.2's banner reads `state`** and can use `Rules::describeState()`.
+      Unconfigured: every screen renders `_section/unconfigured.twig`, every write is refused (400).
+      Rules `save` posts `ruleId` | `collection`, `query`, `matchType`, `pins[]`, `hides[]`,
+      `effectiveFrom` / `effectiveTo` (Craft date-picker arrays), `enabled`; a failed save is
+      `asModelFailure(…, 'rule')` so the edit action receives `rule`. Synonyms `save` posts `groupId` |
+      `collection`, `type` (`oneWay` else all equal), `root`, `words` (list, `[{word}]` rows or one
+      per line), `enabled`; failure route param `group`. `rules/push` = *Push now*. **Templates are
+      skeletons for 3.2 to replace**: `_section/{layout,index,unconfigured}.twig`, `rules/_{index,edit}`,
+      `synonyms/_{index,edit}` (layout = CP layout + Rules/Synonyms tabs; hooks `data-ts-section`,
+      `data-ts-rules`, `data-ts-synonyms`). 22 new strings. Tests: `tests/integration/RulesControllerTest.php`
+      (15: permission registered once; TS-9 steps 1-2 and TN-1 over every screen + action with nothing
+      written or pushed; anonymous; admin without grant; nav placement; every URL rule resolves and
+      `typesense-sync/…` does not; CSRF/POST/CP; TN-14; unreachable cluster still lists rows; BR-4
+      failed push via the controller; BR-8 refusal reaches the form; delete/reorder/toggle push live;
+      Push now; TN-10 section half). **Mutation-checked:** no `requirePermission` fails TN-1. Templates
+      compiled in a one-off Twig parse (7/7); not rendered in a browser (B5 #4 is 3.2's). B5 #1 green
+      on 8.2 + 8.4: 242 unit + 137 integration; #2 no output; #3 valid.
 - [ ] **3.2 Screens** - `src/templates/rules/*.twig`, `src/templates/synonyms/*.twig`, state banner,
       empty states
       Rules: BR-6, BR-7, BR-8, BR-10, BR-11, BR-14 · Verify: B5 #4 (browser), TS-2, TS-6, TS-10, TN-2, TN-3, TN-4, TN-6, TN-7, TN-16

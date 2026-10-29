@@ -1,0 +1,19 @@
+{# The declared collections; with one, the section opens straight on it. #}
+{% extends '_layouts/cp' %}
+
+{% set title = 'Typesense'|t('typesense-sync') %}
+
+{% block content %}
+  {% if collections is empty %}
+    <p data-ts-section="empty">
+      {{ 'No collections are declared in config/typesense-sync.php.'|t('typesense-sync') }}
+      <a href="{{ cpUrl(utilityUrl) }}">{{ 'See the Typesense Sync utility.'|t('typesense-sync') }}</a>
+    </p>
+  {% else %}
+    <ul data-ts-section="collections">
+      {% for item in collections %}
+        <li data-collection="{{ item.handle }}"><a href="{{ item.url }}">{{ item.handle }}</a></li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endblock %}

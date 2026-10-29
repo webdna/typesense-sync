@@ -1,0 +1,6 @@
+{# Synonym group edit. Task 3.2 builds the form. #}
+{% extends 'typesense-sync/_section/layout.twig' %}
+
+{% block content %}
+  <h2>{{ group.id ? group.words|join(', ') : 'New group'|t('typesense-sync') }}</h2>
+{% endblock %}

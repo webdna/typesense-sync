@@ -1,0 +1,10 @@
+{# A collection's Rules tab. Task 3.2 makes this the admin table. #}
+{% extends 'typesense-sync/_section/layout.twig' %}
+
+{% block content %}
+  <ol data-ts-rules>
+    {% for rule in rules %}
+      <li data-id="{{ rule.id }}"><a href="{{ cpUrl(sectionUri ~ '/' ~ collection ~ '/rules/' ~ rule.id) }}">{{ rule.query }}</a></li>
+    {% endfor %}
+  </ol>
+{% endblock %}
