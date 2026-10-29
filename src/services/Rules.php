@@ -8,6 +8,7 @@ use craft\base\ElementInterface;
 use craft\elements\Category;
 use craft\elements\Entry;
 use craft\elements\User;
+use InvalidArgumentException;
 use Throwable;
 use Typesense\Client as TypesenseClient;
 use Typesense\Exceptions\ObjectNotFound;
@@ -256,6 +257,36 @@ class Rules extends Component
     }
 
     /**
+     * Delete the rows kept for a collection the config no longer declares (BR-21). Typesense is
+     * not touched: without the collection's config the plugin cannot name its sets.
+     *
+     * @return array{rules: int, synonyms: int} The rows deleted.
+     * @throws InvalidArgumentException when the collection is still declared.
+     */
+    public function prune(string $collection): array
+    {
+        if (TypesenseSync::getInstance()->targets->getSettings()->getCollectionConfig($collection) !== null) {
+            throw new InvalidArgumentException(Craft::t('typesense-sync', '“{collection}” is still declared; delete its rules and synonyms in the Typesense section instead.', ['collection' => $collection]));
+        }
+
+        $transaction = Craft::$app->getDb()->beginTransaction();
+
+        try {
+            $deleted = [
+                self::KIND_RULES => RuleRecord::deleteAll(['collection' => $collection]),
+                self::KIND_SYNONYMS => SynonymRecord::deleteAll(['collection' => $collection]),
+            ];
+            $transaction->commit();
+        } catch (Throwable $e) {
+            $transaction->rollBack();
+
+            throw $e;
+        }
+
+        return $deleted;
+    }
+
+    /**
      * What the Pin and Hide pickers offer for a collection (BR-8): one picker per element type and
      * site, limited to the sources whose targets route into the collection, entry-type overrides
      * included. A picker cannot tell entry types apart, so an entry type routed elsewhere is still
@@ -297,6 +328,30 @@ class Rules extends Component
     public function elementFor(string $collection, int $elementId): ?ElementInterface
     {
         return $this->elementFeeding($collection, $elementId)[0] ?? null;
+    }
+
+    /**
+     * The id of the element feeding the collection whose document id this is, for adopt (BR-18).
+     * The candidate is the id's trailing number — the element id itself, or a formatter's prefixed
+     * one (`doc-12`) — accepted only when the collection's formatter gives that element exactly
+     * this document id. Null otherwise.
+     */
+    public function elementForDocument(string $collection, string $documentId): ?int
+    {
+        if (!preg_match('/(\d+)$/', $documentId, $match) || (int)$match[1] < 1) {
+            return null;
+        }
+
+        $feeding = $this->elementFeeding($collection, (int)$match[1]);
+
+        if ($feeding === null) {
+            return null;
+        }
+
+        [$element, $formatter] = $feeding;
+        $id = $formatter instanceof BaseFormatter ? $formatter->documentId($element) : (string)$element->id;
+
+        return $id === $documentId ? (int)$element->id : null;
     }
 
     // What Typesense is sent ---------------------------------------------------------------------
@@ -468,6 +523,41 @@ class Rules extends Component
             $this->client()->collections[$physical]->update($patch);
         } catch (Throwable $e) {
             throw $this->failure(Craft::t('typesense-sync', 'Could not link sets to collection "{name}"', ['name' => $physical]), $e);
+        }
+
+        return true;
+    }
+
+    /**
+     * Take one set off the live version's links, keeping every other link — adopt's last step
+     * (BR-18). The set itself is left in Typesense. Nothing is sent when nothing is live or the
+     * version does not link it.
+     *
+     * @return bool Whether a PATCH was sent.
+     * @throws SyncException
+     * @throws InvalidConfigException
+     */
+    public function unlink(string $collection, string $kind, string $name): bool
+    {
+        $schema = TypesenseSync::getInstance()->collections->getLiveSchema($collection);
+
+        if ($schema === null) {
+            return false;
+        }
+
+        $key = self::LINK_KEYS[$kind];
+        $linked = Collections::normaliseSets($schema[$key] ?? []);
+
+        if (!in_array($name, $linked, true)) {
+            return false;
+        }
+
+        $physical = (string)$schema['name'];
+
+        try {
+            $this->client()->collections[$physical]->update([$key => array_values(array_diff($linked, [$name]))]);
+        } catch (Throwable $e) {
+            throw $this->failure(Craft::t('typesense-sync', 'Could not unlink set "{name}" from collection "{collection}"', ['name' => $name, 'collection' => $physical]), $e);
         }
 
         return true;

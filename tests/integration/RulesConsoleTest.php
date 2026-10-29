@@ -31,6 +31,7 @@ use webdna\typesensesync\services\Collections;
 use webdna\typesensesync\services\Rules;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
 use webdna\typesensesync\tests\fixtures\formatters\NotAFormatter;
+use webdna\typesensesync\tests\fixtures\formatters\PrefixedIdFormatter;
 use webdna\typesensesync\tests\Support\TestCollections;
 use webdna\typesensesync\TypesenseSync;
 use yii\console\ExitCode;
@@ -38,7 +39,8 @@ use yii\console\ExitCode;
 /**
  * The rules console commands against the real server: export, then import on a database where one
  * pinned entry has a new uid and another is gone (TS-7); every refusal changing nothing (TN-11);
- * and an import racing an editor's save (TN-13). BR-16, BR-17, BR-4.
+ * and an import racing an editor's save (TN-13). BR-16, BR-17, BR-4. Adopt (TS-8, TN-12, BR-18)
+ * and prune (TN-10, BR-21).
  */
 class RulesConsoleTest extends Unit
 {
@@ -257,7 +259,189 @@ class RulesConsoleTest extends Unit
         $this->assertSame(['hall', 'garden'], $this->liveQueries());
     }
 
+    // TS-8 - adopt (BR-18) ------------------------------------------------------------------------------
+
+    public function testAdoptCopiesTheSimpleItemsAndSwapsTheLink(): void
+    {
+        $a = $this->saveEntry('Garden Room');
+        $b = $this->saveEntry('Garden Bath');
+        $this->runQueue();
+        $this->saveRule('hall', Rule::MATCH_EXACT, [$a->id]);
+        $this->plugin->rules->push('content');
+        $old = $this->prefix . 'old';
+
+        // Step 1. Ids out of order on purpose: Typesense applies them in lexical order.
+        $this->admin->curationSets->upsert($old, ['items' => [
+            ['id' => 'b-replace', 'rule' => ['query' => 'bath', 'match' => 'exact'], 'replace_query' => 'garden', 'includes' => [['id' => (string)$a->id, 'position' => 1]]],
+            ['id' => 'a-simple', 'rule' => ['query' => 'garden', 'match' => 'exact'], 'includes' => [['id' => (string)$b->id, 'position' => 1], ['id' => '999999', 'position' => 2]], 'excludes' => [['id' => 'not-an-element']]],
+        ]]);
+        $this->linkToLive('curation_sets', $old);
+        $before = $this->searchIds('garden');
+        $this->assertSame([(string)$b->id, (string)$a->id], $before, 'the hand-made rule pins B');
+
+        // Step 2.
+        $run = $this->command('rules/adopt', ['content', 'curationSet' => $old]);
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertStringContainsString("Adopted 1 rules from $old into content.", $run['out']);
+        $this->assertStringContainsString('Item b-replace uses more than a simple rule (replace_query) and was skipped.', $run['err']);
+        $this->assertStringContainsString('Rule “garden”: document 999999 is not an entry feeding this collection and was dropped.', $run['err']);
+        $this->assertStringContainsString('Rule “garden”: document not-an-element is not an entry', $run['err']);
+        $this->assertStringContainsString("Live. content no longer uses $old", $run['out']);
+
+        $rules = $this->plugin->rules->getRules('content');
+        $this->assertSame(['hall', 'garden'], array_map(fn(Rule $rule) => $rule->query, $rules), 'appended after the existing rule');
+        $this->assertSame([$b->id], $rules[1]->pins);
+        $this->assertSame([], $rules[1]->hides);
+        $this->assertSame(['hall', 'garden'], $this->liveQueries(), 'pushed');
+
+        // Step 3.
+        $schema = $this->plugin->collections->getLiveSchema('content');
+        $this->assertSame([$this->prefix . 'content_rules'], Collections::normaliseSets($schema['curation_sets'] ?? []), 'owned linked, source unlinked');
+        $this->assertNotNull($this->plugin->rules->liveSet(Rules::KIND_RULES, $old), 'the source set is kept');
+        $this->assertInStep('after adopt');
+
+        // Step 4.
+        $this->assertSame($before, $this->searchIds('garden'), 'search behaves as before');
+
+        // Run again: nothing is adopted twice, and there is nothing left to unlink.
+        $again = $this->command('rules/adopt', ['content', 'curationSet' => $old]);
+        $this->assertSame(ExitCode::OK, $again['exit'], $again['err']);
+        $this->assertStringContainsString("Adopted 0 rules from $old", $again['out']);
+        $this->assertStringContainsString('Item a-simple was not adopted', $again['err']);
+        $this->assertStringContainsString("content did not use $old", $again['out']);
+        $this->assertCount(2, $this->plugin->rules->getRules('content'));
+    }
+
+    public function testAdoptCopiesSynonymGroupsAndSkipsALocale(): void
+    {
+        $old = $this->prefix . 'oldsyn';
+        $this->admin->synonymSets->upsert($old, ['items' => [
+            ['id' => 'all', 'synonyms' => ['care home', 'nursing home']],
+            ['id' => 'fr', 'synonyms' => ['maison', 'foyer'], 'locale' => 'fr'],
+            ['id' => 'one', 'root' => 'garden', 'synonyms' => ['allotment']],
+        ]]);
+        $this->linkToLive('synonym_sets', $old);
+
+        $run = $this->command('rules/adopt', ['content', 'synonymSet' => $old]);
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertStringContainsString("Adopted 2 synonym groups from $old into content.", $run['out']);
+        $this->assertStringContainsString('Item fr uses more than a simple rule (locale)', $run['err']);
+        $this->assertSame(
+            [[null, ['care home', 'nursing home']], ['garden', ['allotment']]],
+            array_map(fn(SynonymGroup $group) => [$group->root, $group->words], $this->plugin->rules->getSynonymGroups('content')),
+        );
+        $schema = $this->plugin->collections->getLiveSchema('content');
+        $this->assertSame([$this->prefix . 'content_synonyms'], Collections::normaliseSets($schema['synonym_sets'] ?? []));
+        $this->assertInStep('after adopt');
+
+        $again = $this->command('rules/adopt', ['content', 'synonymSet' => $old]);
+        $this->assertSame(ExitCode::OK, $again['exit'], $again['err']);
+        $this->assertStringContainsString('Item all is already a synonym group here', $again['err']);
+        $this->assertCount(2, $this->plugin->rules->getSynonymGroups('content'), 'nothing adopted twice');
+    }
+
+    public function testAdoptFindsTheElementBehindAnOverriddenDocumentId(): void
+    {
+        $this->useSettings($this->settings(PrefixedIdFormatter::class));
+        $a = $this->saveEntry('Garden Room');
+        $old = $this->prefix . 'old';
+        $this->admin->curationSets->upsert($old, ['items' => [
+            ['id' => 'x', 'rule' => ['query' => 'garden', 'match' => 'contains'], 'includes' => [['id' => 'doc-' . $a->id, 'position' => 1]], 'excludes' => [['id' => (string)$a->id]]],
+        ]]);
+
+        $run = $this->command('rules/adopt', ['content', 'curationSet' => $old]);
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertSame([$a->id], $this->plugin->rules->getRules('content')[0]->pins, 'doc-<id> is the element');
+        $this->assertStringContainsString("document {$a->id} is not an entry", $run['err'], 'the bare id is not this formatter\'s document');
+    }
+
+    // TN-12 - adopt refusals ------------------------------------------------------------------------------
+
+    public function testAdoptRefusesAMissingSetOrTwoSetsChangingNothing(): void
+    {
+        $owned = $this->prefix . 'content_rules';
+        $cases = [
+            'no such set' => [['content', 'curationSet' => $this->prefix . 'nope'], 'There is no curation set'],
+            'no such synonym set' => [['content', 'synonymSet' => $this->prefix . 'nope'], 'There is no synonym set'],
+            'both' => [['content', 'curationSet' => 'a', 'synonymSet' => 'b'], 'Name one set to adopt'],
+            'neither' => [['content'], 'Name one set to adopt'],
+            'its own set' => [['content', 'curationSet' => $owned], 'is the set the plugin keeps for content'],
+            'undeclared' => [['gone', 'curationSet' => 'a'], 'No collection “gone” is declared'],
+        ];
+
+        foreach ($cases as $case => [$params, $reason]) {
+            $run = $this->command('rules/adopt', $params);
+            $this->assertSame(ExitCode::USAGE, $run['exit'], $case);
+            $this->assertStringContainsString($reason, $run['err'], $case);
+        }
+
+        $this->assertSame(['rules' => [], 'synonyms' => []], $this->rowIds(), 'nothing written');
+    }
+
+    // TN-10 - prune (BR-21) -------------------------------------------------------------------------------
+
+    public function testPruneDeletesAnUndeclaredCollectionsRowsAfterConfirming(): void
+    {
+        $a = $this->saveEntry('Garden Room');
+        $this->saveRule('garden', Rule::MATCH_EXACT, [$a->id]);
+        $this->saveGroup(null, ['care home', 'nursing home']);
+        // The config no longer declares "gone", but its rows are still here.
+        $record = new RuleRecord();
+        (new Rule(['collection' => 'gone', 'sortOrder' => 1, 'query' => 'q', 'matchType' => Rule::MATCH_EXACT, 'pins' => [1]]))->populateRecord($record);
+        $record->save(false);
+        $record = new SynonymRecord();
+        (new SynonymGroup(['collection' => 'gone', 'words' => ['a', 'b']]))->populateRecord($record);
+        $record->save(false);
+        $this->assertSame(['gone' => ['rules' => 1, 'synonyms' => 1]], $this->plugin->rules->orphans());
+
+        $wrong = $this->command('rules/prune', ['gone'], ['content']);
+        $this->assertSame(ExitCode::USAGE, $wrong['exit'], 'a wrong answer refuses');
+        $this->assertSame(['gone' => ['rules' => 1, 'synonyms' => 1]], $this->plugin->rules->orphans());
+
+        $declared = $this->command('rules/prune', ['content', 'confirm' => 'content']);
+        $this->assertSame(ExitCode::USAGE, $declared['exit']);
+        $this->assertStringContainsString('“content” is still declared', $declared['err']);
+
+        $unknown = $this->command('rules/prune', ['nope', 'confirm' => 'nope']);
+        $this->assertSame(ExitCode::USAGE, $unknown['exit']);
+        $this->assertStringContainsString('Orphaned: gone.', $unknown['err']);
+
+        $run = $this->command('rules/prune', ['gone'], ['gone']);
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertStringContainsString('Deleted 1 rules and 1 synonym groups kept for gone.', $run['out']);
+        $this->assertSame([], $this->plugin->rules->orphans());
+        $this->assertCount(1, $this->plugin->rules->getRules('content'), 'a declared collection keeps its rows');
+        $this->assertCount(1, $this->plugin->rules->getSynonymGroups('content'));
+    }
+
     // Helpers -----------------------------------------------------------------------------------------
+
+    /**
+     * Link a set to the live collection by hand, as a developer in the dashboard would.
+     */
+    private function linkToLive(string $key, string $name): void
+    {
+        $schema = $this->plugin->collections->getLiveSchema('content');
+        $this->assertNotNull($schema);
+        $this->admin->collections[(string)$schema['name']]->update([$key => [...(array)($schema[$key] ?? []), $name]]);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function searchIds(string $q): array
+    {
+        $result = $this->admin->collections[$this->prefix . 'content']->documents->search(['q' => $q, 'query_by' => 'title', 'drop_tokens_threshold' => 0]);
+
+        return array_map(fn(array $hit) => (string)$hit['document']['id'], (array)$result['hits']);
+    }
+
+    private function runQueue(): void
+    {
+        $queue = Craft::$app->getQueue();
+        $this->assertInstanceOf(\craft\queue\Queue::class, $queue);
+        $queue->run();
+    }
 
     private function assertInStep(string $message): void
     {

@@ -13,6 +13,7 @@ use DateTime;
 use DateTimeZone;
 use InvalidArgumentException;
 use Throwable;
+use webdna\typesensesync\errors\SyncException;
 use webdna\typesensesync\helpers\Commerce;
 use webdna\typesensesync\models\Rule;
 use webdna\typesensesync\models\SynonymGroup;
@@ -22,7 +23,8 @@ use webdna\typesensesync\TypesenseSync;
 use yii\base\InvalidConfigException;
 
 /**
- * Moves a collection's rules and synonyms between environments as a file (BR-16, BR-17).
+ * Moves a collection's rules and synonyms between environments as a file (BR-16, BR-17), and
+ * brings a set made by hand in Typesense under the plugin (adopt, BR-18).
  *
  * An element id means nothing on another environment, so each pinned or hidden element travels as
  * a reference — its uid, and its type, site, section (or group, or product type) and slug, or a
@@ -48,6 +50,16 @@ class RulesTransfer extends Component
     private const SOURCE_KEYS = [
         Entry::class => 'section',
         Category::class => 'group',
+    ];
+
+    /**
+     * The keys a simple set item carries once Typesense's own defaults are taken out
+     * (Rules::normaliseItem()), by kind: anything else is an advanced option adopt skips (BR-18).
+     * `filter_curated_hits` is allowed whatever its value, because a push forces it on (BR-9).
+     */
+    private const SIMPLE_KEYS = [
+        Rules::KIND_RULES => ['id', 'rule', 'includes', 'excludes', 'filter_curated_hits', 'stop_processing', 'effective_from_ts', 'effective_to_ts'],
+        Rules::KIND_SYNONYMS => ['id', 'root', 'synonyms'],
     ];
 
     /**
@@ -244,6 +256,258 @@ class RulesTransfer extends Component
         $written = count(array_filter($models, fn($model) => $model instanceof Rule));
 
         return ['rules' => $written, 'synonyms' => count($models) - $written, 'leftOut' => $leftOut];
+    }
+
+    /**
+     * Bring a set made by hand in Typesense under the plugin (BR-18): copy each item the CP can show
+     * after the collection's rows, push, then unlink the source set from the live collection. The
+     * source set is never deleted. An item outside the simple rule is skipped and listed; a pin or
+     * hide whose document is not an element feeding the collection is dropped and listed; a row
+     * the CP would refuse (an existing rule's term, say) is listed and not written, so running it
+     * again after a failure adopts nothing twice.
+     *
+     * @param string $kind Rules::KIND_RULES for a curation set, Rules::KIND_SYNONYMS for a synonym set.
+     * @return array{rules: int, synonyms: int, skipped: list<string>, unlinked: bool, problem: ?string}
+     * `unlinked` is whether the live collection linked the source set and no longer does; `problem`
+     * says why the run stopped short — the push failed (retry queued) or the unlink did — leaving
+     * the source set linked.
+     * @throws InvalidArgumentException when the set does not exist or is the collection's own.
+     * @throws SyncException when Typesense cannot be asked for the set.
+     * @throws InvalidConfigException when the collection is undeclared.
+     */
+    public function adopt(string $collection, string $kind, string $name): array
+    {
+        $this->requireDeclared($collection);
+        $rules = $this->rulesService();
+
+        if ($name === $rules->setName($collection, $kind)) {
+            throw new InvalidArgumentException(Craft::t('typesense-sync', '“{name}” is the set the plugin keeps for {collection}; there is nothing to adopt.', ['name' => $name, 'collection' => $collection]));
+        }
+
+        $set = $rules->liveSet($kind, $name);
+
+        if ($set === null) {
+            throw new InvalidArgumentException($kind === Rules::KIND_RULES
+                ? Craft::t('typesense-sync', 'There is no curation set “{name}” in Typesense.', ['name' => $name])
+                : Craft::t('typesense-sync', 'There is no synonym set “{name}” in Typesense.', ['name' => $name]));
+        }
+
+        // Typesense applies a set's items in lexical id order: keep that order.
+        $items = array_values(array_filter((array)($set['items'] ?? []), 'is_array'));
+        usort($items, fn(array $a, array $b) => strcmp((string)($a['id'] ?? ''), (string)($b['id'] ?? '')));
+        $skipped = [];
+        $models = [];
+
+        foreach ($items as $item) {
+            $id = (string)($item['id'] ?? '?');
+            $advanced = self::advancedOptions($kind, $item);
+
+            if ($advanced !== []) {
+                $skipped[] = Craft::t('typesense-sync', 'Item {id} uses more than a simple rule ({options}) and was skipped.', ['id' => $id, 'options' => implode(', ', $advanced)]);
+                continue;
+            }
+
+            $model = $kind === Rules::KIND_RULES
+                ? $this->adoptedRule($collection, $item, $skipped)
+                : $this->adoptedGroup($collection, $item, $skipped);
+
+            if ($model !== null) {
+                $models[$id] = $model;
+            }
+        }
+
+        $written = 0;
+        $transaction = Craft::$app->getDb()->beginTransaction();
+
+        try {
+            foreach ($models as $id => $model) {
+                if ($model instanceof Rule ? $rules->saveRule($model) : $rules->saveSynonymGroup($model)) {
+                    $written++;
+                    continue;
+                }
+
+                $skipped[] = Craft::t('typesense-sync', 'Item {id} was not adopted: {error}', ['id' => $id, 'error' => implode(' ', $model->getFirstErrors())]);
+            }
+
+            $transaction->commit();
+        } catch (Throwable $e) {
+            $transaction->rollBack();
+
+            throw $e;
+        }
+
+        $result = [
+            Rules::KIND_RULES => $kind === Rules::KIND_RULES ? $written : 0,
+            Rules::KIND_SYNONYMS => $kind === Rules::KIND_SYNONYMS ? $written : 0,
+            'skipped' => $skipped,
+            'unlinked' => false,
+            'problem' => null,
+        ];
+
+        // The owned set goes live before the source is unlinked, so search never runs on neither.
+        $result['problem'] = $rules->pushOrQueue($collection);
+
+        if ($result['problem'] === null) {
+            try {
+                $result['unlinked'] = $rules->unlink($collection, $kind, $name);
+            } catch (SyncException $e) {
+                $result['problem'] = $e->getMessage();
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * What, in a curation or synonym item, lies outside the simple rule (§2): each option named as
+     * Typesense names it. Empty when the CP can show the item. Values Typesense fills in on its own
+     * (`remove_matched_tokens: false`, a synonym's `root: ""`) are not options.
+     *
+     * @param string $kind Rules::KIND_RULES or Rules::KIND_SYNONYMS.
+     * @param array<array-key, mixed> $item A set item as Typesense returns it.
+     * @return list<string>
+     */
+    public static function advancedOptions(string $kind, array $item): array
+    {
+        $options = [];
+
+        // normaliseItem() drops false, so this one is read first.
+        if ($kind === Rules::KIND_RULES && ($item['stop_processing'] ?? true) === false) {
+            $options[] = 'stop_processing: false';
+        }
+
+        $item = Rules::normaliseItem($item);
+
+        foreach (array_keys($item) as $key) {
+            if (!in_array($key, self::SIMPLE_KEYS[$kind], true)) {
+                $options[] = (string)$key;
+            }
+        }
+
+        if ($kind === Rules::KIND_SYNONYMS) {
+            if (!self::isList($item['synonyms'] ?? null) || array_filter($item['synonyms'], fn($word) => !is_string($word)) !== []) {
+                $options[] = 'synonyms';
+            }
+
+            if (isset($item['root']) && !is_string($item['root'])) {
+                $options[] = 'root';
+            }
+
+            return $options;
+        }
+
+        $rule = is_array($item['rule'] ?? null) ? $item['rule'] : [];
+
+        foreach (array_keys($rule) as $key) {
+            if ($key !== 'query' && $key !== 'match') {
+                $options[] = 'rule.' . $key;
+            }
+        }
+
+        if (!is_string($rule['query'] ?? null)) {
+            $options[] = 'no rule.query';
+        }
+
+        if (!in_array($rule['match'] ?? null, Rule::MATCH_TYPES, true)) {
+            $options[] = 'rule.match';
+        }
+
+        $includes = $item['includes'] ?? [];
+        $positions = is_array($includes) ? array_map(fn($include) => is_array($include) && is_string($include['id'] ?? null) ? ($include['position'] ?? null) : null, $includes) : [null];
+        sort($positions);
+
+        // Pins are positions 1, 2, 3… in the CP; a gap or a repeat cannot be shown.
+        if ($positions !== range(1, count($positions)) && $positions !== []) {
+            $options[] = 'includes.position';
+        }
+
+        $excludes = $item['excludes'] ?? [];
+
+        if (!is_array($excludes) || array_filter($excludes, fn($exclude) => !is_array($exclude) || !is_string($exclude['id'] ?? null)) !== []) {
+            $options[] = 'excludes';
+        }
+
+        foreach (['effective_from_ts', 'effective_to_ts'] as $key) {
+            if (isset($item[$key]) && !is_int($item[$key])) {
+                $options[] = $key;
+            }
+        }
+
+        return $options;
+    }
+
+    /**
+     * A simple curation item as a rule, its documents turned back into elements; null (listed)
+     * when none of them are elements feeding the collection.
+     *
+     * @param array<string, mixed> $item
+     * @param list<string> $skipped
+     */
+    private function adoptedRule(string $collection, array $item, array &$skipped): ?Rule
+    {
+        $rules = $this->rulesService();
+        $query = (string)$item['rule']['query'];
+        $includes = (array)($item['includes'] ?? []);
+        usort($includes, fn(array $a, array $b) => $a['position'] <=> $b['position']);
+        $ids = ['pins' => [], 'hides' => []];
+
+        foreach (['pins' => $includes, 'hides' => (array)($item['excludes'] ?? [])] as $key => $documents) {
+            foreach ($documents as $document) {
+                $id = $rules->elementForDocument($collection, (string)$document['id']);
+
+                if ($id === null) {
+                    $skipped[] = Craft::t('typesense-sync', 'Rule “{query}”: document {id} is not an entry feeding this collection and was dropped.', ['query' => $query, 'id' => $document['id']]);
+                    continue;
+                }
+
+                $ids[$key][] = $id;
+            }
+        }
+
+        if ($ids['pins'] === [] && $ids['hides'] === []) {
+            $skipped[] = Craft::t('typesense-sync', 'Rule “{query}” was skipped: none of its documents are entries feeding this collection.', ['query' => $query]);
+
+            return null;
+        }
+
+        return new Rule([
+            'collection' => $collection,
+            'query' => $query,
+            'matchType' => $item['rule']['match'],
+            'pins' => $ids['pins'],
+            'hides' => $ids['hides'],
+            'effectiveFrom' => isset($item['effective_from_ts']) ? new DateTime('@' . $item['effective_from_ts']) : null,
+            'effectiveTo' => isset($item['effective_to_ts']) ? new DateTime('@' . $item['effective_to_ts']) : null,
+        ]);
+    }
+
+    /**
+     * A simple synonym item as a group; null (listed) when the collection already has the same
+     * group, which is what a second run finds.
+     *
+     * @param array<string, mixed> $item
+     * @param list<string> $skipped
+     */
+    private function adoptedGroup(string $collection, array $item, array &$skipped): ?SynonymGroup
+    {
+        $root = is_string($item['root'] ?? null) && trim($item['root']) !== '' ? $item['root'] : null;
+        $group = new SynonymGroup(['collection' => $collection, 'root' => $root, 'words' => $item['synonyms']]);
+        $same = static fn(SynonymGroup $other): array => [mb_strtolower(trim((string)$other->root)), array_unique(array_map(fn(string $word) => mb_strtolower(trim($word)), $other->words))];
+        $wanted = $same($group);
+        sort($wanted[1]);
+
+        foreach ($this->rulesService()->getSynonymGroups($collection) as $existing) {
+            $have = $same($existing);
+            sort($have[1]);
+
+            if ($have === $wanted) {
+                $skipped[] = Craft::t('typesense-sync', 'Item {id} is already a synonym group here and was skipped.', ['id' => $item['id'] ?? '?']);
+
+                return null;
+            }
+        }
+
+        return $group;
     }
 
     /**

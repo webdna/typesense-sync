@@ -6,6 +6,7 @@ use Codeception\Test\Unit;
 use craft\elements\User;
 use craft\helpers\Json;
 use InvalidArgumentException;
+use webdna\typesensesync\services\Rules;
 use webdna\typesensesync\services\RulesTransfer;
 
 /**
@@ -64,6 +65,59 @@ class RulesTransferTest extends Unit
             'no effectiveTo key' => [Json::encode(['rules' => [$rule, array_diff_key($rule, ['effectiveTo' => 1])]] + self::GOOD), 'Rule 2'],
             'enabled a string' => [Json::encode(['synonyms' => [['root' => null, 'words' => ['a', 'b'], 'enabled' => 'yes']]] + self::GOOD), 'Synonym group 1'],
             'a word not a string' => [Json::encode(['synonyms' => [['root' => null, 'words' => ['a', 2], 'enabled' => true]]] + self::GOOD), 'Synonym group 1'],
+        ];
+    }
+
+    /**
+     * Adopt's simple-scope filter (BR-18): what a retrieved item may carry and still be shown in
+     * the CP.
+     *
+     * @dataProvider adoptItems
+     * @param array<string, mixed> $item
+     * @param list<string> $expected
+     */
+    public function testAdoptTakesOnlyTheSimpleRule(string $kind, array $item, array $expected): void
+    {
+        $this->assertSame($expected, RulesTransfer::advancedOptions($kind, $item));
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: array<string, mixed>, 2: list<string>}>
+     */
+    public static function adoptItems(): array
+    {
+        $simple = [
+            'id' => 'r1',
+            'rule' => ['query' => 'garden', 'match' => 'exact'],
+            'includes' => [['id' => '2', 'position' => 2], ['id' => '1', 'position' => 1]],
+            'excludes' => [['id' => '3']],
+            'effective_from_ts' => 1893456000,
+            // As Typesense returns them: its own defaults are not options.
+            'remove_matched_tokens' => false,
+            'filter_curated_hits' => false,
+            'stop_processing' => true,
+            'filter_by' => '',
+            'metadata' => [],
+        ];
+        $rules = Rules::KIND_RULES;
+        $synonyms = Rules::KIND_SYNONYMS;
+
+        return [
+            'a simple rule, as retrieved' => [$rules, $simple, []],
+            'stop_processing false' => [$rules, ['stop_processing' => false] + $simple, ['stop_processing: false']],
+            'replace_query' => [$rules, ['replace_query' => 'x'] + $simple, ['replace_query']],
+            'filter_by and sort_by' => [$rules, ['filter_by' => 'a:1', 'sort_by' => 'b:asc'] + $simple, ['filter_by', 'sort_by']],
+            'remove_matched_tokens' => [$rules, ['remove_matched_tokens' => true] + $simple, ['remove_matched_tokens']],
+            'metadata' => [$rules, ['metadata' => ['k' => 'v']] + $simple, ['metadata']],
+            'diversity' => [$rules, ['diversity' => ['similarity_metric' => 'x']] + $simple, ['diversity']],
+            'tags' => [$rules, ['rule' => ['query' => 'garden', 'match' => 'exact', 'tags' => ['a']]] + $simple, ['rule.tags']],
+            'triggered by a filter' => [$rules, ['rule' => ['filter_by' => 'a:1']] + $simple, ['rule.filter_by', 'no rule.query', 'rule.match']],
+            'a pin position gap' => [$rules, ['includes' => [['id' => '1', 'position' => 3]]] + $simple, ['includes.position']],
+            'no pins' => [$rules, ['includes' => []] + $simple, []],
+            'a synonym group' => [$synonyms, ['id' => 's1', 'root' => '', 'synonyms' => ['a', 'b'], 'locale' => '', 'symbols_to_index' => []], []],
+            'one way' => [$synonyms, ['id' => 's1', 'root' => 'a', 'synonyms' => ['b']], []],
+            'a locale' => [$synonyms, ['id' => 's1', 'synonyms' => ['a', 'b'], 'locale' => 'fr'], ['locale']],
+            'symbols' => [$synonyms, ['id' => 's1', 'synonyms' => ['a', 'b'], 'symbols_to_index' => ['+']], ['symbols_to_index']],
         ];
     }
 

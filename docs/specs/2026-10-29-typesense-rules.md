@@ -716,8 +716,40 @@ proven before any screen writes rules.
       Typesense equal to the stored rows). **Mutation-checked:** no slug fallback fails TS-7; commit
       instead of rollback fails TN-11. B5 #1 green on 8.2 + 8.4: 255 unit + 150 integration; #2 no
       output; #3 valid.
-- [ ] **4.2 Adopt and prune** - same console controller, `src/services/RulesTransfer.php`
+- [x] **4.2 Adopt and prune** - same console controller, `src/services/RulesTransfer.php`
       Rules: BR-18, BR-21 · Verify: B5 #1, TS-8, TN-10, TN-12
+      *As built (29 Oct 2026):* `RulesTransfer::adopt(collection, kind, set)` → `{rules, synonyms,
+      skipped, unlinked, problem}`; the filter is static `advancedOptions(kind, item)`: after
+      `Rules::normaliseItem()` (so Typesense's own defaults are not options) a rule item may carry
+      only `id`, `rule` (`query` + `match` exact/contains), `includes` (positions exactly 1…n),
+      `excludes`, `filter_curated_hits` (any value — the push forces it on), `stop_processing`
+      (read before normalising, `false` is advanced), `effective_*_ts`; a synonym item only `id`,
+      `root`, `synonyms`. Items are taken in lexical id order (Typesense's). **A document id goes
+      back to an element by `Rules::elementForDocument()`**: its trailing number is the candidate,
+      accepted only when the collection's formatter gives that element exactly this id — so a plain
+      id and a prefixed override (`doc-12`) adopt, and a formatter whose id carries no element id
+      cannot (its pins are dropped and listed). **Unlike import, adopt is not all-or-nothing**: it
+      adds, so a row the CP would refuse is listed and not written, which makes a re-run safe (a
+      rule's term is refused by BR-6; an identical synonym group is skipped). Order: write →
+      `pushOrQueue()` → `Rules::unlink(collection, kind, name)` (PATCH of the live version only;
+      the set is never deleted). A failed push or unlink keeps the rows, leaves the source linked,
+      exits 1 and says to run it again. Exits: 78 config; 64 neither or both options, undeclared,
+      no such set, the collection's own set; 1 unreachable (`checkServer()`) or the push/unlink.
+      **Prune is `Rules::prune()`, beside `orphans()`** (not in RulesTransfer): rows only, one
+      transaction; Typesense is untouched, because without the collection's config the plugin
+      cannot name its sets — they stay, as on uninstall (BR-20), and 5.1's README should say so.
+      **TN-8 names prune as a set delete; it is not** — TN-8 stands on test cleanup and
+      `deleteSet()`. Command: a handle with no orphaned rows exits 64 (a declared one is told to use
+      the section, an unknown one is shown the orphans), then the typed handle or `--confirm`; no
+      config check, so exit 0 / 64 as §6. 20 new strings. Tests: unit `RulesTransferTest` +15
+      filter cases; integration `RulesConsoleTest` +5 — TS-8 steps 1-4 (simple item adopted after
+      an existing rule, `replace_query` item and two bad ids listed, owned linked + source unlinked
+      + source kept, same pinned search, a re-run adopts nothing), synonyms (a `locale` item
+      skipped, one-way kept, re-run skips), an overridden document id, TN-12 (six refusals, nothing
+      written), TN-10 (wrong answer, declared, unknown, then confirmed; a declared collection keeps
+      its rows). **Mutation-checked:** no unlink fails TS-8 and the synonym test; no filter fails
+      both; no formatter check fails the overridden-id test. B5 #1 green on 8.2 + 8.4: 270 unit +
+      155 integration; #2 no output; #3 valid.
 - [ ] **5.1 Release** - `README.md` (Rules section, uninstall note), `CHANGELOG.md` 1.1.0,
       `src/translations/en/typesense-sync.php`, `docs/store-listing.md`, craft5 browser pass
       Rules: BR-20, BR-22 · Verify: B5 #1-#4, TN-15
