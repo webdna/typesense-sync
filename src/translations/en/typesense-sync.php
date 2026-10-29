@@ -304,4 +304,7 @@ return [
     'Could not unlink set "{name}" from collection "{collection}"' => 'Could not unlink set "{name}" from collection "{collection}"',
     'Could not delete set "{name}"' => 'Could not delete set "{name}"',
     'Pushing search rules to Typesense' => 'Pushing search rules to Typesense',
+    'Would link {sets} to {name}.' => 'Would link {sets} to {name}.',
+    'Linked {sets} to {name}.' => 'Linked {sets} to {name}.',
+    'Link {set}' => 'Link {set}',
 ];

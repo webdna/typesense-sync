@@ -78,7 +78,7 @@ class Rules extends Component
     /**
      * The collection-schema key that lists each kind's linked sets.
      */
-    private const LINK_KEYS = [
+    public const LINK_KEYS = [
         self::KIND_RULES => 'curation_sets',
         self::KIND_SYNONYMS => 'synonym_sets',
     ];
@@ -318,16 +318,7 @@ class Rules extends Component
             return false;
         }
 
-        $patch = [];
-
-        foreach (self::LINK_KEYS as $kind => $key) {
-            $linked = array_map('strval', (array)($schema[$key] ?? []));
-            $name = $this->setName($collection, $kind);
-
-            if (!in_array($name, $linked, true)) {
-                $patch[$key] = array_merge($linked, [$name]);
-            }
-        }
+        $patch = $this->linkPatch($collection, $schema);
 
         if ($patch === []) {
             return false;
@@ -342,6 +333,78 @@ class Rules extends Component
         }
 
         return true;
+    }
+
+    /**
+     * Every set a version of the collection links, by schema key: what the given schema links,
+     * in its order, plus the collection's owned sets where missing (BR-2). With no schema, the
+     * owned sets alone.
+     *
+     * @param array<string, mixed>|null $schema A collection schema, or anything with its set lists.
+     * @return array<string, list<string>>
+     * @throws InvalidConfigException
+     */
+    public function linkedSets(string $collection, ?array $schema = null): array
+    {
+        $sets = [];
+
+        foreach (self::LINK_KEYS as $kind => $key) {
+            $sets[$key] = Collections::normaliseSets([...Collections::normaliseSets($schema[$key] ?? []), $this->setName($collection, $kind)]);
+        }
+
+        return $sets;
+    }
+
+    /**
+     * The PATCH that links the owned sets the schema is missing, only for the lists that change;
+     * empty when both are linked.
+     *
+     * @param array<string, mixed> $schema
+     * @return array<string, list<string>>
+     * @throws InvalidConfigException
+     */
+    public function linkPatch(string $collection, array $schema): array
+    {
+        return array_filter(
+            $this->linkedSets($collection, $schema),
+            static fn(array $sets, string $key) => $sets !== Collections::normaliseSets($schema[$key] ?? []),
+            ARRAY_FILTER_USE_BOTH,
+        );
+    }
+
+    /**
+     * Write each owned set that does not exist yet, as Craft holds it. A version cannot be
+     * created linking a set that does not exist (30.0 refuses it), so every build calls this
+     * first. A set that exists is left alone.
+     *
+     * @return string[] The sets written.
+     * @throws SyncException
+     * @throws InvalidConfigException
+     */
+    public function ensureSets(string $collection): array
+    {
+        $client = $this->client();
+        $written = [];
+
+        foreach (self::KINDS as $kind) {
+            $name = $this->setName($collection, $kind);
+
+            if ($this->liveSet($kind, $name) !== null) {
+                continue;
+            }
+
+            try {
+                $kind === self::KIND_RULES
+                    ? $client->curationSets->upsert($name, $this->desiredSet($collection, $kind))
+                    : $client->synonymSets->upsert($name, $this->desiredSet($collection, $kind));
+            } catch (Throwable $e) {
+                throw $this->failure(Craft::t('typesense-sync', 'Could not write set "{name}"', ['name' => $name]), $e);
+            }
+
+            $written[] = $name;
+        }
+
+        return $written;
     }
 
     // State --------------------------------------------------------------------------------------

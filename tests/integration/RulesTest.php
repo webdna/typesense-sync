@@ -34,8 +34,8 @@ use yii\log\Logger;
 
 /**
  * The rules service against the real server: the sets it pushes, what search then does with them,
- * the state it reports and a set deleted without breaking search (TS-1, TS-3, TS-4, TS-11, TN-5,
- * TN-8, TN-9; BR-1, 4, 5, 8, 9, 11, 12, 14).
+ * the state it reports, a set deleted without breaking search, and links that survive a rebuild
+ * (TS-1, TS-3, TS-4, TS-5, TS-11, TN-5, TN-8, TN-9; BR-1, 2, 3, 4, 5, 8, 9, 11, 12, 14).
  */
 class RulesTest extends Unit
 {
@@ -250,11 +250,13 @@ class RulesTest extends Unit
 
     public function testStateReportsMissingDriftedAndInStep(): void
     {
+        // Apply made both sets, empty, and linked them (BR-1, BR-2): in step before any rule.
+        $state = $this->rules()->state('content');
+        $this->assertSame(Rules::STATE_IN_STEP, $state[Rules::KIND_RULES]['state']);
+        $this->assertSame(Rules::STATE_IN_STEP, $state[Rules::KIND_SYNONYMS]['state']);
+
         $a = $this->indexedEntry('Garden A');
         $this->saveRule('garden', Rule::MATCH_EXACT, pins: [$a->id]);
-
-        $this->assertSame(Rules::STATE_NOT_LIVE, $this->rules()->state('content')[Rules::KIND_RULES]['state'], 'nothing pushed yet');
-
         $this->rules()->push('content');
         $state = $this->rules()->state('content');
         $this->assertSame(Rules::STATE_IN_STEP, $state[Rules::KIND_RULES]['state']);
@@ -313,6 +315,56 @@ class RulesTest extends Unit
         $this->assertNull($this->rules()->liveSet(Rules::KIND_SYNONYMS, $name));
         $this->assertSame([], $this->admin->collections[$this->prefix . 'content_1']->retrieve()['synonym_sets']);
         $this->assertSame([], $this->rules()->deleteSet(Rules::KIND_SYNONYMS, $name), 'a set already gone is not an error');
+    }
+
+    public function testRulesSynonymsAndAForeignLinkSurviveARebuild(): void
+    {
+        // TS-5 step 1.
+        $a = $this->indexedEntry('Garden A');
+        $b = $this->indexedEntry('Garden B');
+        $d = $this->indexedEntry('Nursing home');
+        $this->saveRule('garden', Rule::MATCH_EXACT, pins: [$b->id, $a->id]);
+        $this->assertTrue($this->rules()->saveSynonymGroup(new SynonymGroup(['collection' => 'content', 'words' => ['care home', 'nursing home']])));
+        $this->rules()->push('content');
+        $extra = $this->prefix . 'extra';
+        $this->admin->curationSets->upsert($extra, ['items' => []]);
+        $this->admin->collections[$this->prefix . 'content_1']->update(['curation_sets' => [$this->prefix . 'content_rules', $extra]]);
+
+        // Step 2.
+        $result = $this->plugin->collections->recreate('content');
+        $this->assertSame($this->prefix . 'content_2', $result[0]['to']);
+        $schema = $this->admin->collections[$this->prefix . 'content_2']->retrieve();
+        $this->assertSame([$this->prefix . 'content_rules', $extra], $schema['curation_sets'], 'BR-2: the foreign link is carried over');
+        $this->assertSame([$this->prefix . 'content_synonyms'], $schema['synonym_sets']);
+
+        // Step 3.
+        $this->assertSame([(string)$b->id, (string)$a->id], $this->search('garden'));
+        $this->assertContains((string)$d->id, $this->search('care home'));
+        $this->assertTrue($this->plugin->collections->diff('content')['upToDate']);
+        $this->assertSame([$extra], $this->plugin->collections->diff('content')['foreignLinks']);
+    }
+
+    public function testApplyRestoresAMissingLinkAloneWithNoReindex(): void
+    {
+        // TS-5 step 4 (the console's report of it is in ConsoleTest).
+        $a = $this->indexedEntry('Garden A');
+        $b = $this->indexedEntry('Garden B');
+        $this->saveRule('garden', Rule::MATCH_EXACT, pins: [$b->id]);
+        $this->rules()->push('content');
+        $physical = $this->prefix . 'content_1';
+        $this->admin->collections[$physical]->update(['curation_sets' => []]);
+
+        $diff = $this->plugin->collections->diff('content');
+        $this->assertSame([$this->prefix . 'content_rules'], $diff['missingLinks']);
+        $this->assertFalse($diff['upToDate']);
+
+        $applied = $this->plugin->collections->apply('content');
+        $this->assertSame(Collections::ACTION_ALTER, $applied['action']);
+        $this->assertFalse($applied['reindex']);
+        $this->assertSame(['curation_sets' => [$this->prefix . 'content_rules']], $applied['payload']);
+        $this->assertSame([$this->prefix . 'content_rules'], $this->admin->collections[$physical]->retrieve()['curation_sets']);
+        $this->assertSame([(string)$b->id, (string)$a->id], $this->search('garden'));
+        $this->assertSame(Collections::ACTION_NONE, $this->plugin->collections->apply('content')['action'], 'regression row 1: no phantom difference');
     }
 
     /**

@@ -191,6 +191,9 @@ class RecreateTest extends Unit
         $this->assertSame([$this->prefix . 'people_2'], $this->physical('people'));
         $this->assertSame([$this->prefix . 'posts_2'], $this->physical('posts'));
         $this->assertTrue($this->plugin->collections->diff('posts')['upToDate'], 'a reference to the new version reads as the declared alias');
+        // BR-2: the dependant's new version links its own sets too.
+        $this->assertTrue($this->plugin->collections->diff('people')['upToDate']);
+        $this->assertSame([], $this->plugin->collections->diff('posts')['missingLinks']);
     }
 
     public function testADependantThatFailsToBuildLeavesEverythingAsItWas(): void

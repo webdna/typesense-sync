@@ -116,6 +116,9 @@
                     {% for field in diff.changed|keys %}
                       <li>{{ 'Change {field}'|t('typesense-sync', {field: field}) }}</li>
                     {% endfor %}
+                    {% for set in diff.missingLinks %}
+                      <li>{{ 'Link {set}'|t('typesense-sync', {set: set}) }}</li>
+                    {% endfor %}
                     {% for reason in diff.recreateReasons %}
                       <li>{{ reason }}</li>
                     {% endfor %}

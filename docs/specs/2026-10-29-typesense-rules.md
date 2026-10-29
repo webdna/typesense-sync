@@ -529,9 +529,32 @@ proven before any screen writes rules.
       Mutation-checked: BR-9 (`filter_curated_hits` false → TS-11 shows the future entry) and BR-12 (no
       unlink → TN-8 search 404 "Synonym index not found"). B5 #1 green on 8.2 + 8.4: 236 unit + 114
       integration; B5 #2 no output, #3 valid.
-- [ ] **2.1 Links survive everything** - `src/services/Collections.php` (`buildSchema()`, `diff()`,
+- [x] **2.1 Links survive everything** - `src/services/Collections.php` (`buildSchema()`, `diff()`,
       `apply()`, the recreate plan), `normalise` of set lists
       Rules: BR-2, BR-3 · Verify: B5 #1, TS-5, regression rows 1-2
+      *As built (29 Oct):* probed on 30.0 first: **a version naming a set that does not exist is
+      refused** ("Synonym set … not found"), a retrieved schema always carries both lists (`[]` when
+      nothing is linked), and one PATCH may carry fields and lists together. So
+      `Rules::ensureSets()` writes any owned set that is missing (as Craft holds it; an existing set
+      is left alone) before every create, every recreate build and every link restore. The list rule
+      lives once, in `Rules::linkedSets(collection, ?schema)` — the given schema's links in its order,
+      owned names appended where missing — used by `buildSchema(collection, version, ?live)` (create
+      passes nothing; `build()` passes the live version it now reads once, for its document count and
+      its links) and by `Rules::linkPatch()` (only the lists that change), which `link()` now uses.
+      `Collections::normaliseSets()` (static): strings only, blanks dropped, each once, order kept.
+      `diff()` gains `missingLinks` (owned names not linked; counts against `upToDate`),
+      `foreignLinks` (for 2.2's "also linked") and `linked` (the live lists). `apply()`'s alter path
+      PATCHes fields alone as before, then, for missing links, `ensureSets()` + `link()` — so a
+      link-only apply is the PATCH of the lists alone, `reindex` false, "Linked … to …"; a dry run's
+      payload shows both. `Rules::LINK_KEYS` is public. Pulled forward from 2.2 so TS-5 step 4 reads:
+      one "Link <set>" line in `collections/status` and in the utility's out-of-date list (3 new
+      strings). Tests: unit `CollectionsTest` (+6: lists, normalise, diff, link-only apply, dry run,
+      fields + link); integration `RulesTest` TS-5 steps 1-3 and step 4's service half (with
+      regression row 1: a second apply is `none`), `ConsoleTest` step 4's status/apply output and a
+      field alter keeping links, `RecreateTest` the dependant links its own sets (row 2); RulesTest's
+      state test now starts in step (apply made the empty sets). **BR-2 mutation-checked** on TS-5
+      step 2: links not carried, and no lists at all, each fail. B5 #1 green on 8.2 + 8.4: 242 unit +
+      116 integration; #2 no output; #3 valid.
 - [ ] **2.2 Apply, status, setup, utility** - `src/console/controllers/CollectionsController.php`,
       `SetupController.php`, `src/utilities/Utility.php`, `src/templates/_utility.twig`,
       `src/controllers/UtilityController.php`

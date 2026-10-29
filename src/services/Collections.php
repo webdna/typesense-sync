@@ -136,12 +136,15 @@ class Collections extends Component
     }
 
     /**
-     * The create payload for one version of a collection.
+     * The create payload for one version of a collection. It links the collection's owned rule
+     * and synonym sets, plus every set the live version links (BR-2): a version built without
+     * them has no rules at all, and a link sits on the physical version, never on the alias.
      *
+     * @param array<string, mixed>|null $live The live version's schema, whose links are kept.
      * @return array<string, mixed>
      * @throws InvalidConfigException
      */
-    public function buildSchema(string $collection, int $version): array
+    public function buildSchema(string $collection, int $version, ?array $live = null): array
     {
         $config = $this->config($collection);
 
@@ -149,6 +152,7 @@ class Collections extends Component
             'name' => $config->getVersionedName($version),
             'fields' => $this->getDesiredFields($collection),
             'enable_nested_fields' => $config->enableNestedFields,
+            ...$this->rulesService()->linkedSets($collection, $live),
         ];
 
         if ($config->defaultSortingField !== null && $config->defaultSortingField !== '') {
@@ -208,11 +212,14 @@ class Collections extends Component
      * The difference between the desired schema and the live one.
      *
      * `needsRecreate` is set, with its reasons, when the difference is one an alter cannot make.
-     * `upToDate` is true only for a live collection with no difference at all.
+     * `missingLinks` names the owned sets the live version does not link (BR-3); `foreignLinks`
+     * the linked sets the plugin does not own, which are never removed. `linked` is the live
+     * version's set lists. `upToDate` is true only for a live collection with no difference at all.
      *
      * @return array{exists: bool, collection: ?string, added: list<string>, dropped: list<string>,
      *     changed: array<string, array{from: array<string, mixed>, to: array<string, mixed>}>,
-     *     needsRecreate: bool, recreateReasons: list<string>, upToDate: bool, documents: int}
+     *     needsRecreate: bool, recreateReasons: list<string>, missingLinks: list<string>,
+     *     foreignLinks: list<string>, linked: array<string, list<string>>, upToDate: bool, documents: int}
      * @throws SyncException
      * @throws InvalidConfigException
      */
@@ -236,6 +243,9 @@ class Collections extends Component
                 'changed' => [],
                 'needsRecreate' => false,
                 'recreateReasons' => [],
+                'missingLinks' => [],
+                'foreignLinks' => [],
+                'linked' => array_fill_keys(Rules::LINK_KEYS, []),
                 'upToDate' => false,
                 'documents' => 0,
             ];
@@ -284,6 +294,21 @@ class Collections extends Component
             ]);
         }
 
+        $linked = [];
+        $missingLinks = [];
+        $foreignLinks = [];
+
+        foreach (Rules::LINK_KEYS as $kind => $key) {
+            $linked[$key] = self::normaliseSets($live[$key] ?? []);
+            $owned = $this->rulesService()->setName($collection, $kind);
+
+            if (!in_array($owned, $linked[$key], true)) {
+                $missingLinks[] = $owned;
+            }
+
+            array_push($foreignLinks, ...array_diff($linked[$key], [$owned]));
+        }
+
         return [
             'exists' => true,
             'collection' => (string)$live['name'],
@@ -292,7 +317,10 @@ class Collections extends Component
             'changed' => $changed,
             'needsRecreate' => $reasons !== [],
             'recreateReasons' => $reasons,
-            'upToDate' => $added === [] && $dropped === [] && $changed === [] && $reasons === [],
+            'missingLinks' => $missingLinks,
+            'foreignLinks' => $foreignLinks,
+            'linked' => $linked,
+            'upToDate' => $added === [] && $dropped === [] && $changed === [] && $reasons === [] && $missingLinks === [],
             'documents' => (int)($live['num_documents'] ?? 0),
         ];
     }
@@ -341,6 +369,9 @@ class Collections extends Component
                 ]));
             }
 
+            // 30.0 refuses a version linking a set that does not exist.
+            $this->rulesService()->ensureSets($collection);
+
             try {
                 $this->client()->collections->create($schema);
                 $this->client()->aliases->upsert($alias, ['collection_name' => $name]);
@@ -386,22 +417,62 @@ class Collections extends Component
             $fields[] = $desired[$field];
         }
 
-        $payload = ['fields' => $fields];
+        // A missing owned link is restored with a PATCH of the set lists alone, keeping every
+        // other link (BR-3); it changes no document, so it never advises a reindex.
+        $links = $diff['missingLinks'] === [] ? [] : $this->rulesService()->linkPatch($collection, $diff['linked']);
+        $payload = ($fields === [] ? [] : ['fields' => $fields]) + $links;
         $reindex = $diff['added'] !== [] || $changed !== [];
         $summary = sprintf('+%d, -%d, ~%d', count($diff['added']), count($diff['dropped']), count($changed));
         $advice = $reindex ? ' ' . Craft::t('typesense-sync', 'Reindex it so existing documents carry the new fields.') : '';
+        $sets = implode(', ', $diff['missingLinks']);
 
         if ($dryRun) {
-            return $this->result(self::ACTION_ALTER, $name, $payload, $reindex, Craft::t('typesense-sync', 'Would alter {name}: {summary}.', ['name' => $name, 'summary' => $summary]) . $advice);
+            $messages = [
+                $fields === [] ? null : Craft::t('typesense-sync', 'Would alter {name}: {summary}.', ['name' => $name, 'summary' => $summary]) . $advice,
+                $links === [] ? null : Craft::t('typesense-sync', 'Would link {sets} to {name}.', ['sets' => $sets, 'name' => $name]),
+            ];
+
+            return $this->result(self::ACTION_ALTER, $name, $payload, $reindex, implode(' ', array_filter($messages)));
         }
 
-        try {
-            $this->client()->collections[$name]->update($payload);
-        } catch (Throwable $e) {
-            throw $this->failure(Craft::t('typesense-sync', 'Could not alter "{name}"', ['name' => $name]), $e);
+        if ($fields !== []) {
+            try {
+                $this->client()->collections[$name]->update(['fields' => $fields]);
+            } catch (Throwable $e) {
+                throw $this->failure(Craft::t('typesense-sync', 'Could not alter "{name}"', ['name' => $name]), $e);
+            }
         }
 
-        return $this->result(self::ACTION_ALTER, $name, $payload, $reindex, Craft::t('typesense-sync', 'Altered {name}: {summary}.', ['name' => $name, 'summary' => $summary]) . $advice);
+        if ($links !== []) {
+            $this->rulesService()->ensureSets($collection);
+            $this->rulesService()->link($collection);
+        }
+
+        $messages = [
+            $fields === [] ? null : Craft::t('typesense-sync', 'Altered {name}: {summary}.', ['name' => $name, 'summary' => $summary]) . $advice,
+            $links === [] ? null : Craft::t('typesense-sync', 'Linked {sets} to {name}.', ['sets' => $sets, 'name' => $name]),
+        ];
+
+        return $this->result(self::ACTION_ALTER, $name, $payload, $reindex, implode(' ', array_filter($messages)));
+    }
+
+    /**
+     * A schema's list of linked sets as names: strings only, blanks dropped, each once, in order.
+     * A retrieved schema always carries both lists, empty when nothing is linked.
+     *
+     * @return list<string>
+     */
+    public static function normaliseSets(mixed $sets): array
+    {
+        $names = [];
+
+        foreach (is_array($sets) ? $sets : [] as $set) {
+            if (is_string($set) && $set !== '' && !in_array($set, $names, true)) {
+                $names[] = $set;
+            }
+        }
+
+        return $names;
     }
 
     /**
@@ -625,8 +696,11 @@ class Collections extends Component
             throw new SyncException(Craft::t('typesense-sync', 'A collection named "{alias}" already exists and is not an alias, so "{collection}" cannot be recreated behind it.', ['alias' => $alias, 'collection' => $collection]));
         }
 
-        $liveDocuments = $previous !== null ? $this->documentCount($previous) : 0;
-        $schema = $this->buildSchema($collection, $this->nextVersion($collection, $existing));
+        $liveSchema = $previous !== null ? $this->retrieveCollection($previous) : null;
+        $liveDocuments = (int)($liveSchema['num_documents'] ?? 0);
+        // The new version keeps every link the live one has (BR-2), so the sets must exist.
+        $this->rulesService()->ensureSets($collection);
+        $schema = $this->buildSchema($collection, $this->nextVersion($collection, $existing), $liveSchema);
         $schema['fields'] = array_map(static function(array $field) use ($versions): array {
             $reference = (string)($field['reference'] ?? '');
             $joined = strstr($reference, '.', true);
@@ -781,14 +855,17 @@ class Collections extends Component
     }
 
     /**
+     * A physical collection's schema, or null when it does not exist.
+     *
+     * @return array<string, mixed>|null
      * @throws SyncException
      */
-    private function documentCount(string $name): int
+    private function retrieveCollection(string $name): ?array
     {
         try {
-            return (int)($this->client()->collections[$name]->retrieve()['num_documents'] ?? 0);
+            return $this->client()->collections[$name]->retrieve();
         } catch (ObjectNotFound) {
-            return 0;
+            return null;
         } catch (Throwable $e) {
             throw $this->failure(Craft::t('typesense-sync', 'Could not read collection "{name}"', ['name' => $name]), $e);
         }
@@ -941,6 +1018,11 @@ class Collections extends Component
         Craft::error($message, TypesenseSync::HANDLE);
 
         return new SyncException($message, 0, $e);
+    }
+
+    private function rulesService(): Rules
+    {
+        return TypesenseSync::getInstance()->rules;
     }
 
     private function sync(): Sync

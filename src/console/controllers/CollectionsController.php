@@ -243,6 +243,10 @@ class CollectionsController extends Controller
             $this->stdout(sprintf("  ~ %s  %s → %s\n", $name, Json::encode($change['from']), Json::encode($change['to'])), Console::FG_YELLOW);
         }
 
+        foreach ($diff['missingLinks'] as $set) {
+            $this->stdout('  + ' . Craft::t('typesense-sync', 'Link {set}', ['set' => $set]) . "\n", Console::FG_GREEN);
+        }
+
         if ($diff['needsRecreate']) {
             foreach ($diff['recreateReasons'] as $reason) {
                 $this->stdout("  ! $reason\n", Console::FG_RED);

@@ -366,6 +366,19 @@ class ConsoleTest extends Unit
         $run = $this->command('collections/apply');
         $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
         $this->assertStringContainsString('typesense-sync/sync --collection=content', $run['out']);
+        $this->assertStringContainsString('up to date', $this->command('collections/status')['out'], 'a field alter keeps the set links');
+
+        // TS-5 step 4: a dropped link is reported, and apply restores it with no reindex advice.
+        $rules = $this->prefix . 'content_rules';
+        $client = $this->plugin->client->getClient();
+        $this->assertNotNull($client);
+        $client->collections[$this->prefix . 'content_1']->update(['curation_sets' => []]);
+        $this->assertStringContainsString("+ Link $rules", $this->command('collections/status')['out']);
+        $run = $this->command('collections/apply');
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertStringContainsString("Linked $rules to {$this->prefix}content_1.", $run['out']);
+        $this->assertStringNotContainsString('typesense-sync/sync', $run['out']);
+        $this->assertStringContainsString('up to date', $this->command('collections/status')['out']);
     }
 
     public function testApplyRefusesAConfigProblemAndAnUndeclaredCollection(): void

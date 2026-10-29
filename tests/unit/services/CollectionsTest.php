@@ -202,21 +202,35 @@ class CollectionsTest extends Unit
     {
         $this->useSettings($this->settings(['defaultSortingField' => 'startDate']));
         // A version left behind by a failed run is never reused.
-        $this->respond($this->notFound(), $this->json([['name' => 'test_content_1'], ['name' => 'other_1']]), $this->json(['name' => 'test_content_2']), $this->json(['name' => 'test_content']));
+        $this->respond($this->notFound(), $this->json([['name' => 'test_content_1'], ['name' => 'other_1']]));
+        // The rule set exists, the synonym set does not yet.
+        $this->respond($this->json(['name' => 'test_content_rules', 'items' => []]), $this->notFound(), $this->json(['items' => []]));
+        $this->respond($this->json(['name' => 'test_content_2']), $this->json(['name' => 'test_content']));
 
         $result = $this->collections()->apply('content');
 
         $this->assertSame(Collections::ACTION_CREATE, $result['action']);
         $this->assertSame('test_content_2', $result['collection']);
         $this->assertTrue($result['reindex']);
-        $this->assertSame(['GET /aliases/test_content', 'GET /collections', 'POST /collections', 'PUT /aliases/test_content'], $this->paths());
+        $this->assertSame([
+            'GET /aliases/test_content',
+            'GET /collections',
+            'GET /curation_sets/test_content_rules',
+            'GET /synonym_sets/test_content_synonyms',
+            'PUT /synonym_sets/test_content_synonyms',
+            'POST /collections',
+            'PUT /aliases/test_content',
+        ], $this->paths(), 'a missing set is made before the version that links it');
+        $this->assertSame(['items' => []], $this->sent(4));
 
-        $created = $this->sent(2);
+        $created = $this->sent(5);
         $this->assertSame('test_content_2', $created['name']);
         $this->assertSame('startDate', $created['default_sorting_field']);
         $this->assertTrue($created['enable_nested_fields'], 'on unless the collection says otherwise');
         $this->assertSame(['startDate', 'title', 'url'], $this->names($created['fields']));
-        $this->assertSame(['collection_name' => 'test_content_2'], $this->sent(3));
+        $this->assertSame(['test_content_rules'], $created['curation_sets'], 'BR-2');
+        $this->assertSame(['test_content_synonyms'], $created['synonym_sets']);
+        $this->assertSame(['collection_name' => 'test_content_2'], $this->sent(6));
     }
 
     public function testADryRunCreateSendsNothing(): void
@@ -299,6 +313,96 @@ class CollectionsTest extends Unit
         $this->assertSame(Collections::ACTION_NONE, $result['action']);
         $this->assertFalse($result['reindex']);
         $this->assertCount(2, $this->http->history);
+    }
+
+    // Set links (BR-2, BR-3) ----------------------------------------------------------------------
+
+    public function testAVersionLinksTheOwnedSetsAndKeepsTheLiveVersionsOthersInOrder(): void
+    {
+        $fresh = $this->collections()->buildSchema('content', 1);
+        $this->assertSame(['test_content_rules'], $fresh['curation_sets']);
+        $this->assertSame(['test_content_synonyms'], $fresh['synonym_sets']);
+
+        $next = $this->collections()->buildSchema('content', 4, [
+            'curation_sets' => ['test_extra', 'test_content_rules', 'test_extra'],
+            'synonym_sets' => ['test_words'],
+        ]);
+        $this->assertSame(['test_extra', 'test_content_rules'], $next['curation_sets'], 'live order kept, nothing twice');
+        $this->assertSame(['test_words', 'test_content_synonyms'], $next['synonym_sets'], 'an owned set missing from the live version is added');
+        $this->assertSame([], $this->http->history, 'built from what it is given');
+    }
+
+    public function testASetListIsNormalisedToNamesEachOnce(): void
+    {
+        $this->assertSame(['a', 'b'], Collections::normaliseSets(['a', '', 'b', 'a', null, 3, ['c']]));
+        $this->assertSame([], Collections::normaliseSets(null));
+        $this->assertSame([], Collections::normaliseSets('a'));
+    }
+
+    public function testAMissingOwnedLinkIsADifferenceAndAForeignOneIsListed(): void
+    {
+        // As 30.0 retrieves a collection made before 1.1: both lists present and empty.
+        $this->respondLive($this->liveFields(), ['curation_sets' => ['test_extra'], 'synonym_sets' => []]);
+
+        $diff = $this->collections()->diff('content');
+
+        $this->assertSame(['test_content_rules', 'test_content_synonyms'], $diff['missingLinks']);
+        $this->assertSame(['test_extra'], $diff['foreignLinks']);
+        $this->assertSame(['curation_sets' => ['test_extra'], 'synonym_sets' => []], $diff['linked']);
+        $this->assertSame([], $diff['added']);
+        $this->assertFalse($diff['needsRecreate']);
+        $this->assertFalse($diff['upToDate']);
+    }
+
+    public function testApplyRestoresAMissingLinkWithThePatchOfTheSetListsAlone(): void
+    {
+        $this->respondLive($this->liveFields(), ['curation_sets' => ['test_extra'], 'synonym_sets' => []]);
+        // ensureSets: both exist. link(): reads the live version again, then patches.
+        $this->respond($this->json(['items' => []]), $this->json(['items' => []]));
+        $this->respondLive($this->liveFields(), ['curation_sets' => ['test_extra'], 'synonym_sets' => []]);
+        $this->respond($this->json([]));
+
+        $result = $this->collections()->apply('content');
+
+        $this->assertSame(Collections::ACTION_ALTER, $result['action']);
+        $this->assertFalse($result['reindex'], 'no reindex advised (BR-3)');
+        $this->assertSame('Linked test_content_rules, test_content_synonyms to test_content_3.', $result['message']);
+        $this->assertSame('PATCH /collections/test_content_3', $this->paths()[6]);
+        $patch = ['curation_sets' => ['test_extra', 'test_content_rules'], 'synonym_sets' => ['test_content_synonyms']];
+        $this->assertSame($patch, $this->sent(6), 'the foreign link is kept');
+        $this->assertSame($patch, $result['payload']);
+        $this->assertCount(7, $this->http->history);
+    }
+
+    public function testADryRunLinkSendsNothing(): void
+    {
+        $this->respondLive($this->liveFields(), ['synonym_sets' => []]);
+
+        $result = $this->collections()->apply('content', true);
+
+        $this->assertSame(Collections::ACTION_ALTER, $result['action']);
+        $this->assertSame(['synonym_sets' => ['test_content_synonyms']], $result['payload'], 'only the list that changes');
+        $this->assertSame('Would link test_content_synonyms to test_content_3.', $result['message']);
+        $this->assertCount(2, $this->http->history);
+    }
+
+    public function testAFieldChangeAndAMissingLinkAreAppliedTogether(): void
+    {
+        $live = $this->liveFields();
+        $live['legacy'] = $this->retrieved('legacy', 'string');
+        $this->respondLive($live, ['curation_sets' => []]);
+        $this->respond($this->json(['fields' => []]), $this->json(['items' => []]), $this->json(['items' => []]));
+        $this->respondLive($this->liveFields(), ['curation_sets' => []]);
+        $this->respond($this->json([]));
+
+        $result = $this->collections()->apply('content');
+
+        $this->assertSame(['fields' => [['name' => 'legacy', 'drop' => true]], 'curation_sets' => ['test_content_rules']], $result['payload']);
+        $this->assertSame(['fields' => [['name' => 'legacy', 'drop' => true]]], $this->sent(2), 'the field alter carries no set list');
+        $this->assertSame(['curation_sets' => ['test_content_rules']], $this->sent(7));
+        $this->assertStringContainsString('Altered test_content_3: +0, -1, ~0.', $result['message']);
+        $this->assertStringContainsString('Linked test_content_rules to test_content_3.', $result['message']);
+        $this->assertFalse($result['reindex']);
     }
 
     public function testADifferenceAnAlterCannotMakeIsRefusedWithTheReason(): void
@@ -454,6 +558,8 @@ class CollectionsTest extends Unit
                 'enable_nested_fields' => true,
                 'fields' => array_values($fields),
                 'num_documents' => 0,
+                'curation_sets' => ['test_content_rules'],
+                'synonym_sets' => ['test_content_synonyms'],
             ]),
         );
     }

@@ -142,6 +142,10 @@ docker compose run --rm php composer validate --strict --no-plugins
 - **A retrieved curation or synonym set item carries values the server filled in** (30.0:
   `remove_matched_tokens: false` on a curation item, `root: ""` on an all-equal synonym item). Compare
   a set only through `Rules::normaliseItem()`, or every set reads as out of step.
+- **A collection cannot be created naming a curation or synonym set that does not exist** (30.0:
+  "Synonym set `x` not found."), and a retrieved schema always reports `curation_sets` and
+  `synonym_sets`, `[]` when nothing is linked (probed 29 Oct 2026). `Rules::ensureSets()` runs
+  before every build; compare lists only through `Collections::normaliseSets()`.
 - **A one-way synonym's `root` is the term that is *searched*:** `root: "nursing home", synonyms:
   ["care home"]` makes *nursing home* find *care home* and never the reverse (probed 30.0, 29 Oct 2026).
 
