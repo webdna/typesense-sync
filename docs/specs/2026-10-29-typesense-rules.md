@@ -482,10 +482,22 @@ proven before any screen writes rules.
 
 ### Tasks
 
-- [ ] **1.1 Storage** - `src/migrations/Install.php` (new), `src/migrations/m261029_000000_rules.php`,
+- [x] **1.1 Storage** - `src/migrations/Install.php` (new), `src/migrations/m261029_000000_rules.php`,
       `src/records/RuleRecord.php`, `src/records/SynonymRecord.php`, `src/models/Rule.php`,
       `src/models/SynonymGroup.php`, `schemaVersion` → 1.1.0 in `src/TypesenseSync.php`
       Rules: BR-6, BR-7, BR-10, BR-11, BR-20 · Verify: B5 #1 (unit validation tests)
+      *As built (29 Oct):* `Install::createTables()` makes whichever table is missing and is the
+      upgrade migration's whole body (a fresh install marks `m261029` applied without running it);
+      `m261029::safeDown()` refuses. Table names are `RuleRecord::TABLE` / `SynonymRecord::TABLE`.
+      Models carry `fromRecord()` / `populateRecord()` (dates to UTC via `Db::prepareDateForDb`; read
+      back they arrive in the **system** timezone, same instant) and the normalisers
+      `Rule::normaliseIds()` / `SynonymGroup::normaliseWords()` (ints / trimmed words, each once,
+      first order kept; words deduped case-insensitively). BR-6's duplicate check is a model
+      validator querying the table (`LOWER(query)`, own id excluded). BR-11's labels are
+      `Rule::getStatus(?now)` → `on|off|scheduled|ended` (ended at `effectiveTo <= now`). A blank
+      main term makes a group all equal. Tests: `tests/unit/models/{Rule,SynonymGroup}Test.php`
+      (15), `tests/integration/MigrationsTest.php` (install, uninstall drop, upgrade, no revert).
+      B5 #1 green on 8.2 + 8.4: 233 unit + 103 integration.
 - [ ] **1.2 The rules service** - `src/services/Rules.php` (component `rules`): set names, `desiredSet()`
       for both kinds, push, state compare, unlink-then-delete, `jobs/PushRules.php` (retryable);
       `tests/Support/TestCollections.php` deletes sets
