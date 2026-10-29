@@ -298,6 +298,12 @@ class RulesControllerTest extends Unit
         $this->assertStringStartsWith('Saved, not live yet: ', (string)$response->data['message']);
         $this->assertSame(1, (int)RuleRecord::find()->count());
         $this->assertSame(1, $this->countJobs(PushRules::class));
+
+        // A page post (the form, the table's Status action) gets it as a warning, not a success.
+        $response = $this->dispatch('rules/toggle', ['id' => $this->plugin->rules->getRules('content')[0]->id], $user, ['json' => false]);
+        $this->assertSame(302, $response->getStatusCode());
+        $this->assertStringStartsWith('Saved, not live yet: ', (string)(Craft::$app->getSession()->getFlash('cp-notification-error')[0] ?? ''));
+        $this->assertNull(Craft::$app->getSession()->getFlash('cp-notification-success'));
     }
 
     public function testAnInvalidSaveIsRefusedWithItsErrorsAndWritesNothing(): void
@@ -679,7 +685,7 @@ class RulesControllerTest extends Unit
      * the URL rule's route params; a POST as the body.
      *
      * @param array<string, mixed> $params
-     * @param array{cp?: bool, method?: string, csrf?: bool} $options
+     * @param array{cp?: bool, method?: string, csrf?: bool, json?: bool} $options
      */
     private function dispatch(string $route, array $params, ?User $user, array $options = []): Response
     {
@@ -688,7 +694,10 @@ class RulesControllerTest extends Unit
         $method = $options['method'] ?? 'POST';
         $_SERVER['REQUEST_METHOD'] = $method;
         $request->setIsCpRequest($options['cp'] ?? true);
-        $request->getHeaders()->set('Accept', 'application/json');
+        $accept = ($options['json'] ?? true) ? 'application/json' : 'text/html';
+        $request->getHeaders()->set('Accept', $accept);
+        // Accept is read once per request object.
+        $request->setAcceptableContentTypes([$accept => ['q' => 1]]);
         $request->enableCsrfValidation = true;
         $body = $method === 'POST' ? $params : [];
 

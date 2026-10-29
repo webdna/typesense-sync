@@ -211,7 +211,7 @@ class RulesController extends SectionController
             'match' => $rule->matchType === Rule::MATCH_CONTAINS ? Craft::t('typesense-sync', 'Contains') : Craft::t('typesense-sync', 'Exact'),
             'pins' => count($rule->pins),
             'hides' => count($rule->hides),
-            'status' => $status,
+            'statusKey' => $status,
             'statusLabel' => self::statusLabel($status),
             'dates' => implode(', ', $dates),
         ];

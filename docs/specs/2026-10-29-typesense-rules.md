@@ -622,10 +622,10 @@ proven before any screen writes rules.
       Push now; TN-10 section half). **Mutation-checked:** no `requirePermission` fails TN-1. Templates
       compiled in a one-off Twig parse (7/7); not rendered in a browser (B5 #4 is 3.2's). B5 #1 green
       on 8.2 + 8.4: 242 unit + 137 integration; #2 no output; #3 valid.
-- [ ] **3.2 Screens** - `src/templates/rules/*.twig`, `src/templates/synonyms/*.twig`, state banner,
+- [x] **3.2 Screens** - `src/templates/rules/*.twig`, `src/templates/synonyms/*.twig`, state banner,
       empty states
       Rules: BR-6, BR-7, BR-8, BR-10, BR-11, BR-14 · Verify: B5 #4 (browser), TS-2, TS-6, TS-10, TN-2, TN-3, TN-4, TN-6, TN-7, TN-16
-      *As built (29 Oct, browser pass OWED):* every display decision is a PHP variable the tests read,
+      *As built (29 Oct):* every display decision is a PHP variable the tests read,
       and the templates only lay it out. **Banner** = `SectionController::banner(state)` →
       `{lines: [{kind, state, text}], push}`, in `tabVariables()` as `banner`; one line per set not in
       step, the same *unknown* failure for both sets is ONE line, `push` false while only *unknown*.
@@ -658,7 +658,30 @@ proven before any screen writes rules.
       pickers (only the feeding section) and nested pins flattened in order; the admin table's
       reorder / bulk toggle shapes. TN-4 was 3.1's. B5 #1 green on 8.2 + 8.4: 242 unit + 145
       integration; #2 no output; #3 valid. craft5: plugin migration applied (`migrate/up
-      --plugin=typesense-sync`, 1 migration); **B5 #4 not run — the CP needs Sam to sign in.**
+      --plugin=typesense-sync`, 1 migration). **B5 #4 browser pass, craft5, 29 Oct (Sam signed in) —
+      all PASS:** section index (3 collections, counts, per-set state); content opens on its Rules tab
+      with the switcher in the crumbs (people / content / products); banner *not live yet (missing)*
+      → *Push now* → notice, banner gone; new rule: the Pin chooser lists only Journal and Pages (the
+      two sections feeding content) and people's lists Users (BR-8), two pins in order, saved live;
+      a rule with Starts tomorrow reads **Scheduled**, "from 30/10/2026, 00:00" (TS-2 step 3); drag
+      reorder → "New order saved."; Status action Off / On; delete from the table; TS-6: a set PUT
+      straight into Typesense → "Rules are out of step: 1 item differs…" on the Synonyms tab, the
+      next save (a new synonym group) cleared it; One way shows the main term, a blank one is refused
+      on the field with the form kept on One way and the words kept; TS-10 with `TYPESENSE_PORT=1`:
+      rows listed, one *Can't check* line, no *Push now*; a save there says "Saved, not live yet: …",
+      the retry job (attempt 2, once the port was back) put both sets in step; both empty states.
+      **Fixed during the pass:** the admin table gives a column callback the VALUE ONLY, so the
+      status cell threw and the table never drew — the cell is now built in the script
+      (`statusCell`); a row key named `status` makes the table's title slot draw its own status dot
+      (green for a scheduled rule), so the key is `statusKey`; Sam asked for the CP's font sizes —
+      the empty states were `.zilch` (20px) and the forms had their own `<h2>`, now body text with
+      `py-xl` and the term (or New rule / New group) as the page title, measured 14px = body; the
+      picker wrappers broke Craft's field spacing, now `fieldAttributes`; a page post that did not
+      go live flashed as success (Craft's session success flash ignores a type), now a fail flash
+      (`goLive()`, tested with `dispatch(…, ['json' => false])`); the docTitle no longer repeats
+      Typesense. And from the commit security review: a synonym group's words are escaped in the
+      table (the table renders a plain column as HTML; the title slot already escapes). 3.2's
+      tests: 23 in RulesControllerTest; B5 #1 green on 8.2 + 8.4: 242 unit + 145 integration.
 - [ ] **4.1 Export and import** - `src/console/controllers/RulesController.php`,
       `src/services/RulesTransfer.php`
       Rules: BR-16, BR-17 · Verify: B5 #1, TS-7, TN-11, TN-13

@@ -16,9 +16,9 @@
 
 {% block tab %}
   {% if tableData is empty %}
-    <div class="zilch" data-ts-empty="rules">
+    <div class="py-xl" data-ts-empty="rules">
       <p>{{ 'A rule decides what a search shows: when someone searches a term, the entries you pin come first, in your order, and the entries you hide never appear.'|t('typesense-sync') }}</p>
-      <p><a href="{{ newUrl }}" class="btn submit add icon">{{ 'New rule'|t('typesense-sync') }}</a></p>
+      <p><a href="{{ newUrl }}" class="btn add icon">{{ 'New rule'|t('typesense-sync') }}</a></p>
     </div>
   {% else %}
     <div id="ts-rules" data-ts-rules></div>
@@ -28,17 +28,17 @@
       const statuses = {on: 'enabled', off: 'disabled', scheduled: 'pending', ended: 'expired'};
       new Craft.VueAdminTable({
         container: '#ts-rules',
-        tableData: {{ tableData|json_encode|raw }},
+        // A column callback is given the value alone, so the status cell is built here.
+        tableData: {{ tableData|json_encode|raw }}.map((row) => ({
+          ...row,
+          statusCell: `<span class="status ${statuses[row.statusKey] ?? ''}" aria-hidden="true"></span>${Craft.escapeHtml(row.statusLabel)}`,
+        })),
         columns: [
           {name: '__slot:title', title: {{ 'Search term'|t('typesense-sync')|json_encode|raw }}},
           {name: 'match', title: {{ 'Match'|t('typesense-sync')|json_encode|raw }}},
           {name: 'pins', title: {{ 'Pinned'|t('typesense-sync')|json_encode|raw }}},
           {name: 'hides', title: {{ 'Hidden'|t('typesense-sync')|json_encode|raw }}},
-          {
-            name: 'status',
-            title: {{ 'Status'|t('typesense-sync')|json_encode|raw }},
-            callback: (value, row) => `<span class="status ${statuses[value] ?? ''}" aria-hidden="true"></span>${Craft.escapeHtml(row.statusLabel)}`,
-          },
+          {name: 'statusCell', title: {{ 'Status'|t('typesense-sync')|json_encode|raw }}},
           {name: 'dates', title: {{ 'Dates'|t('typesense-sync')|json_encode|raw }}},
         ],
         checkboxes: true,

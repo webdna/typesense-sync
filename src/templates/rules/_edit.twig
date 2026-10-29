@@ -9,6 +9,7 @@
 {% extends 'typesense-sync/_section/layout.twig' %}
 {% import '_includes/forms.twig' as forms %}
 
+{% set title = rule.id ? rule.query : 'New rule'|t('typesense-sync') %}
 {% set fullPageForm = true %}
 {% set tabs = {} %}
 {% set crumbs = (collections|length > 1 ? [{label: 'Typesense'|t('typesense-sync'), url: cpUrl(sectionUri)}] : [])|push(
@@ -31,8 +32,6 @@
     {% else %}
       {{ hiddenInput('collection', collection) }}
     {% endif %}
-
-    <h2>{{ rule.id ? rule.query : 'New rule'|t('typesense-sync') }}</h2>
 
     {{ forms.textField({
       label: 'Search term'|t('typesense-sync'),
@@ -63,7 +62,6 @@
     {% endif %}
 
     {% for picker in pickers %}
-      <div data-ts-picker="pins">
         {{ forms.elementSelectField({
           label: pickers|length > 1
             ? 'Pin ({type})'|t('typesense-sync', {type: picker.label})
@@ -78,12 +76,11 @@
           limit: 20,
           sortable: true,
           errors: loop.last ? rule.getErrors('pins') : null,
+          fieldAttributes: {data: {'ts-picker': 'pins'}},
         }) }}
-      </div>
     {% endfor %}
 
     {% for picker in pickers %}
-      <div data-ts-picker="hides">
         {{ forms.elementSelectField({
           label: pickers|length > 1
             ? 'Hide ({type})'|t('typesense-sync', {type: picker.label})
@@ -97,8 +94,8 @@
           elements: picker.hidden,
           sortable: false,
           errors: loop.last ? rule.getErrors('hides') : null,
+          fieldAttributes: {data: {'ts-picker': 'hides'}},
         }) }}
-      </div>
     {% endfor %}
 
     {{ forms.dateTimeField({

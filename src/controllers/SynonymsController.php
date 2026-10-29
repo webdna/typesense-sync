@@ -47,7 +47,7 @@ class SynonymsController extends SectionController
                 'url' => RulesController::tabUrl($group->collection, Rules::KIND_SYNONYMS) . '/' . $group->id,
                 'type' => $group->isOneWay() ? Craft::t('typesense-sync', 'One way') : Craft::t('typesense-sync', 'All equal'),
                 'words' => $group->isOneWay() ? implode(', ', $group->words) : '',
-                'status' => $group->enabled ? 'on' : 'off',
+                'statusKey' => $group->enabled ? 'on' : 'off',
                 'statusLabel' => $group->enabled ? Craft::t('typesense-sync', 'On') : Craft::t('typesense-sync', 'Off'),
             ], $groups),
         ] + $this->tabVariables($collection));

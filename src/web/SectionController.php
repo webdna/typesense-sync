@@ -162,7 +162,16 @@ abstract class SectionController extends Controller
             return $this->asSuccess($message, $data, $redirect);
         }
 
-        return $this->asSuccess(Craft::t('typesense-sync', 'Saved, not live yet: {reason}', ['reason' => $reason]), $data, $redirect, [
+        $message = Craft::t('typesense-sync', 'Saved, not live yet: {reason}', ['reason' => $reason]);
+
+        // A page post's success flash is always styled as success, so the warning is a fail flash.
+        if (!$this->request->getAcceptsJson()) {
+            $this->setFailFlash($message);
+
+            return $redirect !== null ? $this->redirect($redirect) : $this->redirectToPostedUrl();
+        }
+
+        return $this->asSuccess($message, $data, $redirect, [
             'notificationSettings' => ['type' => 'error'],
         ]);
     }

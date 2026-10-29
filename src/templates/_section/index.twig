@@ -18,7 +18,7 @@
 
 {% block content %}
   {% if collections is empty %}
-    <div class="zilch" data-ts-section="empty">
+    <div class="py-xl" data-ts-section="empty">
       <p>{{ 'No collections are declared in config/typesense-sync.php.'|t('typesense-sync') }}</p>
       <p><a href="{{ cpUrl(utilityUrl) }}">{{ 'See the Typesense Sync utility.'|t('typesense-sync') }}</a></p>
     </div>

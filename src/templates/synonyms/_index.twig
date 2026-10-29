@@ -14,9 +14,9 @@
 
 {% block tab %}
   {% if tableData is empty %}
-    <div class="zilch" data-ts-empty="synonyms">
+    <div class="py-xl" data-ts-empty="synonyms">
       <p>{{ 'A synonym group lists words that count as the same, so searching for one finds pages that use another: care home, nursing home, residential care.'|t('typesense-sync') }}</p>
-      <p><a href="{{ newUrl }}" class="btn submit add icon">{{ 'New group'|t('typesense-sync') }}</a></p>
+      <p><a href="{{ newUrl }}" class="btn add icon">{{ 'New group'|t('typesense-sync') }}</a></p>
     </div>
   {% else %}
     <div id="ts-synonyms" data-ts-synonyms></div>
@@ -25,17 +25,17 @@
     {% js %}
       new Craft.VueAdminTable({
         container: '#ts-synonyms',
-        tableData: {{ tableData|json_encode|raw }},
+        // A column callback is given the value alone, so the status cell is built here.
+        tableData: {{ tableData|json_encode|raw }}.map((row) => ({
+          ...row,
+          statusCell: `<span class="status ${row.statusKey === 'on' ? 'enabled' : 'disabled'}" aria-hidden="true"></span>${Craft.escapeHtml(row.statusLabel)}`,
+        })),
         columns: [
           {name: '__slot:title', title: {{ 'Words'|t('typesense-sync')|json_encode|raw }}},
           {name: 'type', title: {{ 'Type'|t('typesense-sync')|json_encode|raw }}},
           // The table renders a column as HTML; these are an editor's own words.
           {name: 'words', title: {{ 'Finds'|t('typesense-sync')|json_encode|raw }}, callback: (value) => Craft.escapeHtml(value)},
-          {
-            name: 'status',
-            title: {{ 'Status'|t('typesense-sync')|json_encode|raw }},
-            callback: (value, row) => `<span class="status ${value === 'on' ? 'enabled' : 'disabled'}" aria-hidden="true"></span>${Craft.escapeHtml(row.statusLabel)}`,
-          },
+          {name: 'statusCell', title: {{ 'Status'|t('typesense-sync')|json_encode|raw }}},
         ],
         checkboxes: true,
         actions: [{

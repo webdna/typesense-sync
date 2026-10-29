@@ -22,6 +22,7 @@
   destructive: true,
 }] : null %}
 {% set rows = group.words|map(word => {word: word}) %}
+{% set title = group.id ? name : 'New group'|t('typesense-sync') %}
 
 {% block tab %}
   <div data-ts-form="synonyms">
@@ -31,8 +32,6 @@
     {% else %}
       {{ hiddenInput('collection', collection) }}
     {% endif %}
-
-    <h2>{{ group.id ? name : 'New group'|t('typesense-sync') }}</h2>
 
     {{ forms.radioGroupField({
       label: 'Type'|t('typesense-sync'),

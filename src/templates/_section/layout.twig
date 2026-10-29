@@ -4,20 +4,20 @@
   by SectionController::banner(); it is empty while both sets are in step. *Push now* posts by
   script, so it works inside an edit screen's form too.
 
-  A child sets `crumbs` or `tabs` before extending to replace them, and fills `tab`.
+  A child sets `title`, `crumbs` or `tabs` before extending to replace them, and fills `tab`.
 
   Test hooks: data-ts-banner on the banner, data-ts-banner-line="<rules|synonyms|>" with
   data-state="not-live|out-of-step|unknown" on each line, data-ts-action="push" on Push now.
 #}
 {% extends '_layouts/cp' %}
 
-{% set title = 'Typesense'|t('typesense-sync') %}
-{% set docTitle = collection ~ ' - ' ~ title %}
+{% set title = title ?? 'Typesense'|t('typesense-sync') %}
+{% set docTitle = (title != 'Typesense'|t('typesense-sync') ? title ~ ' - ') ~ collection ~ ' - ' ~ 'Typesense'|t('typesense-sync') %}
 {% set tabUrls = {
   rules: cpUrl(sectionUri ~ '/' ~ collection ~ '/rules'),
   synonyms: cpUrl(sectionUri ~ '/' ~ collection ~ '/synonyms'),
 } %}
-{% set crumbs = crumbs ?? (collections|length > 1 ? [{label: title, url: cpUrl(sectionUri)}] : []) %}
+{% set crumbs = crumbs ?? (collections|length > 1 ? [{label: 'Typesense'|t('typesense-sync'), url: cpUrl(sectionUri)}] : []) %}
 {% set tabs = tabs ?? {
   rules: {label: 'Rules'|t('typesense-sync'), url: tabUrls.rules},
   synonyms: {label: 'Synonyms'|t('typesense-sync'), url: tabUrls.synonyms},
