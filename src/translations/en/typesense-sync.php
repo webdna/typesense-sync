@@ -297,4 +297,11 @@ return [
     '“{collection}” is already up to date.' => '“{collection}” is already up to date.',
     '“{element}” is a draft or revision; only the published element is synced.' => '“{element}” is a draft or revision; only the published element is synced.',
     '“{element}” is not declared for search, so it is not synced.' => '“{element}” is not declared for search, so it is not synced.',
+    'Only entries that feed this collection can be pinned or hidden.' => 'Only entries that feed this collection can be pinned or hidden.',
+    'Could not write set "{name}"' => 'Could not write set "{name}"',
+    'Could not link sets to collection "{name}"' => 'Could not link sets to collection "{name}"',
+    'Could not read set "{name}"' => 'Could not read set "{name}"',
+    'Could not unlink set "{name}" from collection "{collection}"' => 'Could not unlink set "{name}" from collection "{collection}"',
+    'Could not delete set "{name}"' => 'Could not delete set "{name}"',
+    'Pushing search rules to Typesense' => 'Pushing search rules to Typesense',
 ];

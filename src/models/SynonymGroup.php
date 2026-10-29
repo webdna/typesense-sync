@@ -11,7 +11,7 @@ use webdna\typesensesync\records\SynonymRecord;
  * Words that count as the same in a collection's searches.
  *
  * With no `root` the group is *all equal*: each word finds the others. With a root it is *one
- * way*: the words find the root, not the reverse.
+ * way*: searching the root finds the words, not the reverse (Typesense's `root`).
  *
  * @since 1.1.0
  */

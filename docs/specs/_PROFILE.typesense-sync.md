@@ -139,6 +139,12 @@ docker compose run --rm php composer validate --strict --no-plugins
   carries keys the server filled in (`rule_tag`, `capture_search_requests`, `expand_query`), so
   compare only the declared ones.
 
+- **A retrieved curation or synonym set item carries values the server filled in** (30.0:
+  `remove_matched_tokens: false` on a curation item, `root: ""` on an all-equal synonym item). Compare
+  a set only through `Rules::normaliseItem()`, or every set reads as out of step.
+- **A one-way synonym's `root` is the term that is *searched*:** `root: "nursing home", synonyms:
+  ["care home"]` makes *nursing home* find *care home* and never the reverse (probed 30.0, 29 Oct 2026).
+
 ### Tooling
 
 - **Craft 5's `TestSetup::configureCraft()` needs `CRAFT_ROOT_PATH` and `CRAFT_TESTS_PATH` defined,

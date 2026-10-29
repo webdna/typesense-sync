@@ -2,7 +2,7 @@
 spec: Curations and synonyms in the CP
 slug: typesense-rules
 status: approved
-version: 1.0
+version: 1.0.1
 date: 2026-10-29
 author: Claude, with Sam Birch
 client: webdna (Plugin Store product); first site St Monica Trust
@@ -13,7 +13,7 @@ related: [2026-09-30-typesense-sync.md]
 
 # Curations and synonyms in the CP
 
-> **Status:** approved - **Version:** 1.0 - **Profile:** `_PROFILE.typesense-sync.md`
+> **Status:** approved - **Version:** 1.0.1 - **Profile:** `_PROFILE.typesense-sync.md`
 > Editors can decide what a search shows (pin, hide, schedule) and which words count as the same,
 > from the Craft control panel, without a developer opening the Typesense dashboard.
 
@@ -52,7 +52,7 @@ Craft — less code, but a collection rebuild or a new environment would lose ev
 | Rule | "When the search is *X*, pin these, hide those." Typesense calls it a *curation*. |
 | Pin | Put an entry at a fixed position at the top of a search's results. |
 | Hide | Keep an entry out of a search's results, however well it matches. |
-| Synonym group | Words that count as the same. *All equal*: each finds the others. *One way*: the words find the main term, not the reverse. |
+| Synonym group | Words that count as the same. *All equal*: each finds the others. *One way*: the main term finds the words, not the reverse (Typesense's `root`). |
 | Out of step | What Typesense holds differs from what Craft holds — usually someone edited it in the dashboard. |
 | Adopt | Copy a set made by hand in Typesense into a collection's rules or synonyms, and stop using the original. |
 
@@ -340,7 +340,7 @@ utility and settings screen did.
 | 1 | Entry D titled "nursing home"; search "care home" | D not found |
 | 2 | Save an All equal group "care home", "nursing home" | Synonym set holds `synonym-0001` with both words, no root |
 | 3 | Search "care home" | D found |
-| 4 | Change it to One way, main term "nursing home", words "care home"; search "care home" | D found; searching "nursing home" does not find a page saying only "care home" |
+| 4 | Change it to One way, main term "care home", words "nursing home"; search "care home" | D found; searching "nursing home" does not find a page saying only "care home" |
 
 *Success criterion: steps 3 and 4 match the group type.*
 
@@ -498,10 +498,37 @@ proven before any screen writes rules.
       main term makes a group all equal. Tests: `tests/unit/models/{Rule,SynonymGroup}Test.php`
       (15), `tests/integration/MigrationsTest.php` (install, uninstall drop, upgrade, no revert).
       B5 #1 green on 8.2 + 8.4: 233 unit + 103 integration.
-- [ ] **1.2 The rules service** - `src/services/Rules.php` (component `rules`): set names, `desiredSet()`
+- [x] **1.2 The rules service** - `src/services/Rules.php` (component `rules`): set names, `desiredSet()`
       for both kinds, push, state compare, unlink-then-delete, `jobs/PushRules.php` (retryable);
       `tests/Support/TestCollections.php` deletes sets
       Rules: BR-1, BR-4, BR-5, BR-8, BR-9, BR-11, BR-12, BR-14 · Verify: B5 #1, TS-1, TS-3, TS-4, TS-11, TN-5, TN-8, TN-9
+      *As built (29 Oct):* `Rules` also owns the rows — `getRules` / `getSynonymGroups` / `get…ById`,
+      `saveRule` (BR-8: refused, `pins`/`hides` error, when an id is not an element routing to the
+      collection), `saveSynonymGroup`, `deleteRow(kind, id)`, `reorder(kind, collection, ids)`; a new row
+      goes last. **Row writes never push**: the caller saves, then `pushOrQueue()` (null = live, else the
+      reason; queues `PushRules` and sets a cache flag, `isPending()`). `push()` PUTs both sets (empty
+      ones too, BR-1) then `link()` — a PATCH adding only the owned names to the live version's lists,
+      others kept; nothing before a version exists (2.1 links at build, and can reuse `link()`). Item
+      ids are the running index of the items actually pushed (`rule-0001`…), not `sortOrder`, so gaps or
+      equal orders cannot clash; empty `includes`/`excludes` keys are omitted, and a rule whose elements
+      all fail to resolve is skipped with a warning. `state()` per kind →
+      `{state, name, exists, linked, differs, message}`; a differing set reads *not live* while the
+      pending flag is set (a push failed and is queued), *out of step* otherwise — the one thing a push
+      records, and it expires (`PushRules::ATTEMPTS × TTR + 60` s, 5 × 120). Comparison is
+      `Rules::countDiffering()` over `normaliseItem()`, which drops false / '' / null / [] — 30.0 fills in
+      `remove_matched_tokens: false` and `root: ""` (probed) — and sorts keys. `deleteSet(kind, name)`
+      unlinks from every collection, then deletes; a set already gone is fine. Element → document id
+      goes through the target's site and formatter (TN-9 fixture `PrefixedIdFormatter`).
+      **Spec corrected:** probed on 30.0, `root: "nursing home"` makes *nursing home* find *care home*,
+      never the reverse — so one way is "the main term finds the words" (§1 vocabulary, TS-4 step 4);
+      one group stays one item with `root` = the main term, which keeps export and adopt 1:1.
+      `TestCollections::deleteAll()` deletes the prefix's collections first (dropping their links),
+      unlinks any other link to a prefix set, then deletes the sets. Tests: `tests/unit/services/RulesTest.php`
+      (3), `tests/integration/RulesTest.php` (11: TS-1, TS-3, TS-4, TS-11, TN-5, TN-8, TN-9, BR-8 refusal,
+      BR-11 timestamps, state in step / out of step / unlinked, BR-4 failed push → job → live).
+      Mutation-checked: BR-9 (`filter_curated_hits` false → TS-11 shows the future entry) and BR-12 (no
+      unlink → TN-8 search 404 "Synonym index not found"). B5 #1 green on 8.2 + 8.4: 236 unit + 114
+      integration; B5 #2 no output, #3 valid.
 - [ ] **2.1 Links survive everything** - `src/services/Collections.php` (`buildSchema()`, `diff()`,
       `apply()`, the recreate plan), `normalise` of set lists
       Rules: BR-2, BR-3 · Verify: B5 #1, TS-5, regression rows 1-2
@@ -642,5 +669,6 @@ docker compose run --rm php composer validate --strict --no-plugins
 
 | Date | Version | Change | By |
 |---|---|---|---|
+| 2026-10-29 | 1.0.1 | Task 1.2: one-way synonyms corrected to Typesense's direction (the main term finds the words), probed on 30.0; §1 vocabulary and TS-4 step 4 | Claude |
 | 2026-10-29 | 1.0 | Approved by Sam. Appendix A row 1 (St Monica's server version) moved to St Monica's migration work - it does not block this build or release | Sam Birch |
 | 2026-10-29 | 0.1 | First draft; supersedes the 1.0 spec's out-of-scope row "Synonyms and curation rules" | Claude, with Sam Birch |
