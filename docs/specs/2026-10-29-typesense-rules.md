@@ -1,8 +1,8 @@
 ---
 spec: Curations and synonyms in the CP
 slug: typesense-rules
-status: draft
-version: 0.1
+status: approved
+version: 1.0
 date: 2026-10-29
 author: Claude, with Sam Birch
 client: webdna (Plugin Store product); first site St Monica Trust
@@ -13,7 +13,7 @@ related: [2026-09-30-typesense-sync.md]
 
 # Curations and synonyms in the CP
 
-> **Status:** draft - **Version:** 0.1 - **Profile:** `_PROFILE.typesense-sync.md`
+> **Status:** approved - **Version:** 1.0 - **Profile:** `_PROFILE.typesense-sync.md`
 > Editors can decide what a search shows (pin, hide, schedule) and which words count as the same,
 > from the Craft control panel, without a developer opening the Typesense dashboard.
 
@@ -518,7 +518,6 @@ proven before any screen writes rules.
 
 | # | Question | Owner | State |
 |---|---|---|---|
-| 1 | Is St Monica Trust's Typesense server 30.0 or later? Not this spec's blocker, but nothing here helps St Monica until it is. | Sam | Open - blocking St Monica's migration spec, not this build |
 | 2 | Store listing and screenshots: add the Typesense section to the listing text and shots? | Sam | Open - blocking release |
 
 **Assumptions**
@@ -631,4 +630,5 @@ docker compose run --rm php composer validate --strict --no-plugins
 
 | Date | Version | Change | By |
 |---|---|---|---|
+| 2026-10-29 | 1.0 | Approved by Sam. Appendix A row 1 (St Monica's server version) moved to St Monica's migration work - it does not block this build or release | Sam Birch |
 | 2026-10-29 | 0.1 | First draft; supersedes the 1.0 spec's out-of-scope row "Synonyms and curation rules" | Claude, with Sam Birch |
