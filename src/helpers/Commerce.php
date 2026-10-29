@@ -68,6 +68,22 @@ final class Commerce
     }
 
     /**
+     * A product type's uid by handle, or null when Commerce is not installed or has no such type.
+     */
+    public static function productTypeUid(string $handle): ?string
+    {
+        $commerce = self::isInstalled() ? Craft::$app->getPlugins()->getPlugin(self::HANDLE) : null;
+
+        if ($commerce === null || !method_exists($commerce, 'getProductTypes')) {
+            return null;
+        }
+
+        $type = $commerce->getProductTypes()->getProductTypeByHandle($handle);
+
+        return $type !== null ? (string)$type->uid : null;
+    }
+
+    /**
      * A query for every product of one type, or null when Commerce is not installed.
      */
     public static function productQuery(string $productType): ?ElementQueryInterface

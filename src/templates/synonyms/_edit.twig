@@ -1,6 +1,84 @@
-{# Synonym group edit. Task 3.2 builds the form. #}
-{% extends 'typesense-sync/_section/layout.twig' %}
+{#
+  New synonym group, or edit one: All equal or One way, the main term (one way only) and the words
+  as an editable table. BR-10's errors show on their fields. Saving pushes the whole set (BR-4).
 
-{% block content %}
-  <h2>{{ group.id ? group.words|join(', ') : 'New group'|t('typesense-sync') }}</h2>
+  Test hooks: data-ts-form="synonyms".
+#}
+{% extends 'typesense-sync/_section/layout.twig' %}
+{% import '_includes/forms.twig' as forms %}
+
+{% set fullPageForm = true %}
+{% set tabs = {} %}
+{% set crumbs = (collections|length > 1 ? [{label: 'Typesense'|t('typesense-sync'), url: cpUrl(sectionUri)}] : [])|push(
+  {label: 'Synonyms'|t('typesense-sync'), url: cpUrl(sectionUri ~ '/' ~ collection ~ '/synonyms')}
+) %}
+{% set name = group.isOneWay() ? group.root : group.words|join(', ') %}
+{% set formActions = group.id ? [{
+  label: 'Delete group'|t('typesense-sync'),
+  action: 'typesense-sync/synonyms/delete',
+  params: {id: group.id},
+  redirect: (sectionUri ~ '/' ~ collection ~ '/synonyms')|hash,
+  confirm: 'Delete the synonym group “{name}”?'|t('typesense-sync', {name: name}),
+  destructive: true,
+}] : null %}
+{% set rows = group.words|map(word => {word: word}) %}
+
+{% block tab %}
+  <div data-ts-form="synonyms">
+    {{ actionInput('typesense-sync/synonyms/save') }}
+    {% if group.id %}
+      {{ hiddenInput('groupId', group.id) }}
+    {% else %}
+      {{ hiddenInput('collection', collection) }}
+    {% endif %}
+
+    <h2>{{ group.id ? name : 'New group'|t('typesense-sync') }}</h2>
+
+    {{ forms.radioGroupField({
+      label: 'Type'|t('typesense-sync'),
+      id: 'type',
+      name: 'type',
+      options: [
+        {label: 'All equal — searching any word finds the others'|t('typesense-sync'), value: 'allEqual'},
+        {label: 'One way — searching the main term finds the words, not the reverse'|t('typesense-sync'), value: 'oneWay'},
+      ],
+      value: group.isOneWay() ? 'oneWay' : 'allEqual',
+      toggle: true,
+      targetPrefix: 'ts-type-',
+    }) }}
+
+    <div id="ts-type-oneWay"{% if not group.isOneWay() %} class="hidden"{% endif %}>
+      {{ forms.textField({
+        label: 'Main term'|t('typesense-sync'),
+        instructions: 'What a visitor searches for.'|t('typesense-sync'),
+        id: 'root',
+        name: 'root',
+        value: group.root,
+        maxlength: 255,
+        required: true,
+        errors: group.getErrors('root'),
+      }) }}
+    </div>
+
+    {{ forms.editableTableField({
+      label: 'Words'|t('typesense-sync'),
+      instructions: 'One word or phrase per row; blanks and repeats are dropped. Up to {max}.'|t('typesense-sync', {max: 50}),
+      id: 'words',
+      name: 'words',
+      cols: {word: {heading: 'Word or phrase'|t('typesense-sync'), type: 'singleline'}},
+      rows: rows is empty ? [{word: ''}, {word: ''}] : rows,
+      allowAdd: true,
+      allowDelete: true,
+      allowReorder: true,
+      addRowLabel: 'Add a word'|t('typesense-sync'),
+      errors: group.getErrors('words'),
+    }) }}
+
+    {{ forms.lightswitchField({
+      label: 'Enabled'|t('typesense-sync'),
+      id: 'enabled',
+      name: 'enabled',
+      on: group.enabled,
+    }) }}
+  </div>
 {% endblock %}

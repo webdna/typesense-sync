@@ -1,6 +1,130 @@
-{# Rule edit. Task 3.2 builds the form. #}
-{% extends 'typesense-sync/_section/layout.twig' %}
+{#
+  New rule, or edit one. The Pin and Hide pickers offer only the sources feeding the collection,
+  one picker per element type (BR-8, RulesController::pickers()); several pickers post
+  `pins[<n>][]`, flattened in picker order. Errors from BR-6, BR-7, BR-8 and BR-11 show on their
+  fields. Saving pushes the whole set (BR-4).
 
-{% block content %}
-  <h2>{{ rule.id ? rule.query : 'New rule'|t('typesense-sync') }}</h2>
+  Test hooks: data-ts-form="rule", data-ts-picker="pins|hides" on each picker field.
+#}
+{% extends 'typesense-sync/_section/layout.twig' %}
+{% import '_includes/forms.twig' as forms %}
+
+{% set fullPageForm = true %}
+{% set tabs = {} %}
+{% set crumbs = (collections|length > 1 ? [{label: 'Typesense'|t('typesense-sync'), url: cpUrl(sectionUri)}] : [])|push(
+  {label: 'Rules'|t('typesense-sync'), url: cpUrl(sectionUri ~ '/' ~ collection ~ '/rules')}
+) %}
+{% set formActions = rule.id ? [{
+  label: 'Delete rule'|t('typesense-sync'),
+  action: 'typesense-sync/rules/delete',
+  params: {id: rule.id},
+  redirect: (sectionUri ~ '/' ~ collection ~ '/rules')|hash,
+  confirm: 'Delete the rule for “{name}”?'|t('typesense-sync', {name: rule.query}),
+  destructive: true,
+}] : null %}
+
+{% block tab %}
+  <div data-ts-form="rule">
+    {{ actionInput('typesense-sync/rules/save') }}
+    {% if rule.id %}
+      {{ hiddenInput('ruleId', rule.id) }}
+    {% else %}
+      {{ hiddenInput('collection', collection) }}
+    {% endif %}
+
+    <h2>{{ rule.id ? rule.query : 'New rule'|t('typesense-sync') }}</h2>
+
+    {{ forms.textField({
+      label: 'Search term'|t('typesense-sync'),
+      instructions: 'What a visitor types into search.'|t('typesense-sync'),
+      id: 'query',
+      name: 'query',
+      value: rule.query,
+      maxlength: 255,
+      required: true,
+      autofocus: not rule.id,
+      errors: rule.getErrors('query'),
+    }) }}
+
+    {{ forms.radioGroupField({
+      label: 'Match'|t('typesense-sync'),
+      id: 'matchType',
+      name: 'matchType',
+      options: [
+        {label: 'Exact — only that search'|t('typesense-sync'), value: 'exact'},
+        {label: 'Contains — any search that includes the term'|t('typesense-sync'), value: 'contains'},
+      ],
+      value: rule.matchType,
+      errors: rule.getErrors('matchType'),
+    }) }}
+
+    {% if pickers is empty %}
+      <p class="warning with-icon">{{ 'Nothing feeds this collection, so there is nothing to pin or hide. Declare its sources in config/typesense-sync.php.'|t('typesense-sync') }}</p>
+    {% endif %}
+
+    {% for picker in pickers %}
+      <div data-ts-picker="pins">
+        {{ forms.elementSelectField({
+          label: pickers|length > 1
+            ? 'Pin ({type})'|t('typesense-sync', {type: picker.label})
+            : 'Pin'|t('typesense-sync'),
+          instructions: loop.first ? 'Shown first for this search, in this order. Up to {max}.'|t('typesense-sync', {max: 20}) : null,
+          id: 'pins-' ~ loop.index0,
+          name: 'pins[' ~ loop.index0 ~ ']',
+          elementType: picker.elementType,
+          sources: picker.sources,
+          criteria: {siteId: picker.siteId, status: null},
+          elements: picker.pinned,
+          limit: 20,
+          sortable: true,
+          errors: loop.last ? rule.getErrors('pins') : null,
+        }) }}
+      </div>
+    {% endfor %}
+
+    {% for picker in pickers %}
+      <div data-ts-picker="hides">
+        {{ forms.elementSelectField({
+          label: pickers|length > 1
+            ? 'Hide ({type})'|t('typesense-sync', {type: picker.label})
+            : 'Hide'|t('typesense-sync'),
+          instructions: loop.first ? 'Never shown for this search, however well they match.'|t('typesense-sync') : null,
+          id: 'hides-' ~ loop.index0,
+          name: 'hides[' ~ loop.index0 ~ ']',
+          elementType: picker.elementType,
+          sources: picker.sources,
+          criteria: {siteId: picker.siteId, status: null},
+          elements: picker.hidden,
+          sortable: false,
+          errors: loop.last ? rule.getErrors('hides') : null,
+        }) }}
+      </div>
+    {% endfor %}
+
+    {{ forms.dateTimeField({
+      label: 'Starts'|t('typesense-sync'),
+      instructions: 'Optional. Before then the rule does nothing.'|t('typesense-sync'),
+      id: 'effectiveFrom',
+      name: 'effectiveFrom',
+      value: rule.effectiveFrom,
+      errors: rule.getErrors('effectiveFrom'),
+    }) }}
+
+    {{ forms.dateTimeField({
+      label: 'Ends'|t('typesense-sync'),
+      instructions: 'Optional. From then the rule does nothing.'|t('typesense-sync'),
+      id: 'effectiveTo',
+      name: 'effectiveTo',
+      value: rule.effectiveTo,
+      errors: rule.getErrors('effectiveTo'),
+    }) }}
+
+    {{ forms.lightswitchField({
+      label: 'Enabled'|t('typesense-sync'),
+      instructions: rule.id ? 'Now: {status}'|t('typesense-sync', {status: statusLabel}) : null,
+      id: 'enabled',
+      name: 'enabled',
+      on: rule.enabled,
+    }) }}
+  </div>
 {% endblock %}

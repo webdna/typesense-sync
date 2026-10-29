@@ -625,6 +625,40 @@ proven before any screen writes rules.
 - [ ] **3.2 Screens** - `src/templates/rules/*.twig`, `src/templates/synonyms/*.twig`, state banner,
       empty states
       Rules: BR-6, BR-7, BR-8, BR-10, BR-11, BR-14 · Verify: B5 #4 (browser), TS-2, TS-6, TS-10, TN-2, TN-3, TN-4, TN-6, TN-7, TN-16
+      *As built (29 Oct, browser pass OWED):* every display decision is a PHP variable the tests read,
+      and the templates only lay it out. **Banner** = `SectionController::banner(state)` →
+      `{lines: [{kind, state, text}], push}`, in `tabVariables()` as `banner`; one line per set not in
+      step, the same *unknown* failure for both sets is ONE line, `push` false while only *unknown*.
+      It sits in `_section/layout.twig` above a `tab` block (children fill `tab`, not `content`) on
+      every collection screen, edit screens too; *Push now* posts by script
+      (`Craft.sendActionRequest`), because an edit screen is a `fullPageForm` and a nested form is
+      invalid. **Pickers (BR-8)** = `Rules::pickers(collection)`: one per element type + site, from
+      `getTargetsForCollection()` (entry-type overrides included), source keys `section:<uid>`,
+      `group:<uid>`, `*` (users), `productType:<uid>` (new `Commerce::productTypeUid()`); a picker
+      cannot filter by entry type, so saveRule() still refuses one routed elsewhere. Several pickers
+      post `pins[<n>][]` — **one shared name would lose values**, because each element select posts
+      its own empty `name=''` first — and `RulesController::ids()` flattens in picker order.
+      **Lists** are Craft's `VueAdminTable` over `tableData` rows built in the controllers
+      (`RulesController::tableRow()`, `statusLabel()`: On / Off / Scheduled / Ended); drag = reorder,
+      delete, and a *Status* bulk action. The table posts reorder as `ids` alone and its actions as
+      `ids[]` + `enabled`, so `reorder` now takes `collection` from the first row when not posted and
+      `toggle` takes `ids` (one collection, one push). **One way with a blank main term is refused**
+      on `root` ("Enter the main term, or choose All equal.") instead of saving as all equal; the
+      error path leaves `root = ''` so the form stays on One way (Craft's Model constructor typecasts
+      `''` to null — set it after construction). Collection switcher = `disclosureMenu()` in
+      `contextMenu` (several collections only); edit screens drop the tabs for crumbs and carry
+      Delete in `formActions`. A child template's top-level `set` runs BEFORE the layout's, so a
+      child cannot read the layout's variables there. 50 new strings. Tests:
+      `RulesControllerTest` +8 — every screen rendered for real through
+      `View::renderTemplate(…, TEMPLATE_MODE_CP)` (works in the harness), both empty states, the
+      switcher; TS-2 step 3 (Scheduled / Ended / Off labels); TS-6 steps 2-3 (out of step, 1 item
+      differs, on either tab, gone after a save); TS-10 step 1 (one *Can't check* line, no Push now);
+      each banner state's wording; TN-2, TN-3 ×2, TN-6, TN-7 ×2, TN-16 ×2 and the blank main term
+      through the forms, each on its field, nothing written, the error rendered under it; BR-8
+      pickers (only the feeding section) and nested pins flattened in order; the admin table's
+      reorder / bulk toggle shapes. TN-4 was 3.1's. B5 #1 green on 8.2 + 8.4: 242 unit + 145
+      integration; #2 no output; #3 valid. craft5: plugin migration applied (`migrate/up
+      --plugin=typesense-sync`, 1 migration); **B5 #4 not run — the CP needs Sam to sign in.**
 - [ ] **4.1 Export and import** - `src/console/controllers/RulesController.php`,
       `src/services/RulesTransfer.php`
       Rules: BR-16, BR-17 · Verify: B5 #1, TS-7, TN-11, TN-13

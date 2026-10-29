@@ -5,15 +5,20 @@ namespace webdna\typesensesync\services;
 use Craft;
 use craft\base\Component;
 use craft\base\ElementInterface;
+use craft\elements\Category;
+use craft\elements\Entry;
+use craft\elements\User;
 use Throwable;
 use Typesense\Client as TypesenseClient;
 use Typesense\Exceptions\ObjectNotFound;
 use webdna\typesensesync\errors\SyncException;
 use webdna\typesensesync\formatters\BaseFormatter;
 use webdna\typesensesync\formatters\FormatterInterface;
+use webdna\typesensesync\helpers\Commerce;
 use webdna\typesensesync\jobs\PushRules;
 use webdna\typesensesync\models\CollectionConfig;
 use webdna\typesensesync\models\Rule;
+use webdna\typesensesync\models\SourceConfig;
 use webdna\typesensesync\models\SynonymGroup;
 use webdna\typesensesync\records\RuleRecord;
 use webdna\typesensesync\records\SynonymRecord;
@@ -248,6 +253,41 @@ class Rules extends Component
         ksort($orphans);
 
         return $orphans;
+    }
+
+    /**
+     * What the Pin and Hide pickers offer for a collection (BR-8): one picker per element type and
+     * site, limited to the sources whose targets route into the collection, entry-type overrides
+     * included. A picker cannot tell entry types apart, so an entry type routed elsewhere is still
+     * offered; saveRule() refuses it.
+     *
+     * @return list<array{elementType: class-string<ElementInterface>, label: string, siteId: int, sources: list<string>}>
+     * @throws InvalidConfigException when the collection is undeclared.
+     */
+    public function pickers(string $collection): array
+    {
+        $this->config($collection);
+        $targets = TypesenseSync::getInstance()->targets;
+        $pickers = [];
+
+        foreach ($targets->getSettings()->getTargetsForCollection($collection) as $target) {
+            $site = $targets->siteFor($target);
+            $source = $target->source !== null ? self::pickerSource($target->source) : null;
+
+            if ($site === null || $source === null) {
+                continue;
+            }
+
+            [$elementType, $key] = $source;
+            $id = $elementType . ':' . $site->id;
+            $pickers[$id] ??= ['elementType' => $elementType, 'label' => $elementType::pluralDisplayName(), 'siteId' => (int)$site->id, 'sources' => []];
+
+            if (!in_array($key, $pickers[$id]['sources'], true)) {
+                $pickers[$id]['sources'][] = $key;
+            }
+        }
+
+        return array_values($pickers);
     }
 
     // What Typesense is sent ---------------------------------------------------------------------
@@ -845,6 +885,30 @@ class Rules extends Component
     {
         return TypesenseSync::getInstance()->targets->getSettings()->getCollectionConfig($collection)
             ?? throw new InvalidConfigException(Craft::t('typesense-sync', 'No collection "{collection}" is declared in config/typesense-sync.php.', ['collection' => $collection]));
+    }
+
+    /**
+     * A declared source as an element type and the element-select source key that lists it, or
+     * null when its section, group or product type does not exist.
+     *
+     * @return array{0: class-string<ElementInterface>, 1: string}|null
+     */
+    private static function pickerSource(SourceConfig $source): ?array
+    {
+        $uid = match ($source->kind) {
+            SourceConfig::KIND_SECTION => Craft::$app->getEntries()->getSectionByHandle($source->handle)?->uid,
+            SourceConfig::KIND_CATEGORY_GROUP => Craft::$app->getCategories()->getGroupByHandle($source->handle)?->uid,
+            SourceConfig::KIND_PRODUCT_TYPE => Commerce::productTypeUid($source->handle),
+            default => null,
+        };
+
+        return match (true) {
+            $source->kind === SourceConfig::KIND_USERS => [User::class, '*'],
+            $uid === null => null,
+            $source->kind === SourceConfig::KIND_SECTION => [Entry::class, 'section:' . $uid],
+            $source->kind === SourceConfig::KIND_CATEGORY_GROUP => [Category::class, 'group:' . $uid],
+            default => ($product = Commerce::productClass()) !== null ? [$product, 'productType:' . $uid] : null,
+        };
     }
 
     private function pendingKey(string $collection): string

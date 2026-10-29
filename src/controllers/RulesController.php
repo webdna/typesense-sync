@@ -80,9 +80,11 @@ class RulesController extends SectionController
         }
 
         $collection = $this->requireCollection($collection);
+        $rules = self::plugin()->rules->getRules($collection);
 
         return $this->renderTemplate('typesense-sync/rules/_index.twig', [
-            'rules' => self::plugin()->rules->getRules($collection),
+            'rules' => $rules,
+            'tableData' => array_map(fn(Rule $rule) => self::tableRow($rule), $rules),
         ] + $this->tabVariables($collection));
     }
 
@@ -103,6 +105,8 @@ class RulesController extends SectionController
 
         return $this->renderTemplate('typesense-sync/rules/_edit.twig', [
             'rule' => $rule,
+            'pickers' => $this->pickers($rule),
+            'statusLabel' => self::statusLabel($rule->getStatus()),
         ] + $this->tabVariables($collection));
     }
 
@@ -127,8 +131,8 @@ class RulesController extends SectionController
 
         $rule->query = trim((string)$this->request->getBodyParam('query', $rule->query));
         $rule->matchType = (string)$this->request->getBodyParam('matchType', $rule->matchType);
-        $rule->pins = Rule::normaliseIds($this->request->getBodyParam('pins', $rule->pins));
-        $rule->hides = Rule::normaliseIds($this->request->getBodyParam('hides', $rule->hides));
+        $rule->pins = Rule::normaliseIds(self::ids($this->request->getBodyParam('pins', $rule->pins)));
+        $rule->hides = Rule::normaliseIds(self::ids($this->request->getBodyParam('hides', $rule->hides)));
         $rule->effectiveFrom = self::date($this->request->getBodyParam('effectiveFrom'), $rule->effectiveFrom);
         $rule->effectiveTo = self::date($this->request->getBodyParam('effectiveTo'), $rule->effectiveTo);
         $rule->enabled = (bool)$this->request->getBodyParam('enabled', $rule->enabled);
@@ -171,6 +175,91 @@ class RulesController extends SectionController
     public static function tabUrl(string $collection, string $kind): string
     {
         return UrlHelper::cpUrl(sprintf('%s/%s/%s', TypesenseSync::SECTION_URI, $collection, $kind));
+    }
+
+    /**
+     * The words a rule's status is shown as (BR-11).
+     */
+    public static function statusLabel(string $status): string
+    {
+        return match ($status) {
+            Rule::STATUS_OFF => Craft::t('typesense-sync', 'Off'),
+            Rule::STATUS_SCHEDULED => Craft::t('typesense-sync', 'Scheduled'),
+            Rule::STATUS_ENDED => Craft::t('typesense-sync', 'Ended'),
+            default => Craft::t('typesense-sync', 'On'),
+        };
+    }
+
+    /**
+     * One row of the Rules tab's admin table.
+     *
+     * @return array<string, mixed>
+     */
+    private static function tableRow(Rule $rule): array
+    {
+        $status = $rule->getStatus();
+        $formatter = Craft::$app->getFormatter();
+        $dates = array_filter([
+            $rule->effectiveFrom !== null ? Craft::t('typesense-sync', 'from {date}', ['date' => $formatter->asDatetime($rule->effectiveFrom, 'short')]) : null,
+            $rule->effectiveTo !== null ? Craft::t('typesense-sync', 'until {date}', ['date' => $formatter->asDatetime($rule->effectiveTo, 'short')]) : null,
+        ]);
+
+        return [
+            'id' => $rule->id,
+            'title' => $rule->query,
+            'url' => self::tabUrl($rule->collection, Rules::KIND_RULES) . '/' . $rule->id,
+            'match' => $rule->matchType === Rule::MATCH_CONTAINS ? Craft::t('typesense-sync', 'Contains') : Craft::t('typesense-sync', 'Exact'),
+            'pins' => count($rule->pins),
+            'hides' => count($rule->hides),
+            'status' => $status,
+            'statusLabel' => self::statusLabel($status),
+            'dates' => implode(', ', $dates),
+        ];
+    }
+
+    /**
+     * The collection's pickers (BR-8), each with the rule's pinned and hidden elements of its type,
+     * in the rule's order. An element no longer there is left out, so the next save drops it.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function pickers(Rule $rule): array
+    {
+        $pickers = self::plugin()->rules->pickers($rule->collection);
+
+        foreach ($pickers as $index => $picker) {
+            $ids = array_merge($rule->pins, $rule->hides);
+            $found = $ids === [] ? [] : $picker['elementType']::find()
+                ->id($ids)
+                ->siteId($picker['siteId'])
+                ->status(null)
+                ->indexBy('id')
+                ->all();
+            $pick = static fn(array $ids) => array_values(array_filter(array_map(fn(int $id) => $found[$id] ?? null, $ids)));
+            $pickers[$index] += ['pinned' => $pick($rule->pins), 'hidden' => $pick($rule->hides)];
+        }
+
+        return $pickers;
+    }
+
+    /**
+     * Posted element ids as one list: a flat list, or one list per picker (`pins[0][]`), each
+     * picker's empty value included.
+     *
+     * @return array<int|string, mixed>
+     */
+    private static function ids(mixed $posted): array
+    {
+        if (!is_array($posted)) {
+            return (array)$posted;
+        }
+
+        $ids = [];
+        array_walk_recursive($posted, function(mixed $id) use (&$ids) {
+            $ids[] = $id;
+        });
+
+        return $ids;
     }
 
     /**

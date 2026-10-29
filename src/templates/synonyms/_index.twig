@@ -1,10 +1,55 @@
-{# A collection's Synonyms tab. Task 3.2 makes this the admin table. #}
+{#
+  A collection's Synonyms tab: Craft's admin table, drag to reorder (display order only), delete,
+  and a Status action to switch groups on or off. Every change pushes the whole set (BR-4).
+
+  Test hooks: data-ts-synonyms on the table, data-ts-empty="synonyms" on the empty state.
+#}
 {% extends 'typesense-sync/_section/layout.twig' %}
 
-{% block content %}
-  <ol data-ts-synonyms>
-    {% for group in groups %}
-      <li data-id="{{ group.id }}"><a href="{{ cpUrl(sectionUri ~ '/' ~ collection ~ '/synonyms/' ~ group.id) }}">{{ group.words|join(', ') }}</a></li>
-    {% endfor %}
-  </ol>
+{% set newUrl = cpUrl(sectionUri ~ '/' ~ collection ~ '/synonyms/new') %}
+
+{% block actionButton %}
+  <a href="{{ newUrl }}" class="btn submit add icon">{{ 'New group'|t('typesense-sync') }}</a>
+{% endblock %}
+
+{% block tab %}
+  {% if tableData is empty %}
+    <div class="zilch" data-ts-empty="synonyms">
+      <p>{{ 'A synonym group lists words that count as the same, so searching for one finds pages that use another: care home, nursing home, residential care.'|t('typesense-sync') }}</p>
+      <p><a href="{{ newUrl }}" class="btn submit add icon">{{ 'New group'|t('typesense-sync') }}</a></p>
+    </div>
+  {% else %}
+    <div id="ts-synonyms" data-ts-synonyms></div>
+
+    {% do view.registerAssetBundle('craft\\web\\assets\\admintable\\AdminTableAsset') %}
+    {% js %}
+      new Craft.VueAdminTable({
+        container: '#ts-synonyms',
+        tableData: {{ tableData|json_encode|raw }},
+        columns: [
+          {name: '__slot:title', title: {{ 'Words'|t('typesense-sync')|json_encode|raw }}},
+          {name: 'type', title: {{ 'Type'|t('typesense-sync')|json_encode|raw }}},
+          {name: 'words', title: {{ 'Finds'|t('typesense-sync')|json_encode|raw }}},
+          {
+            name: 'status',
+            title: {{ 'Status'|t('typesense-sync')|json_encode|raw }},
+            callback: (value, row) => `<span class="status ${value === 'on' ? 'enabled' : 'disabled'}" aria-hidden="true"></span>${Craft.escapeHtml(row.statusLabel)}`,
+          },
+        ],
+        checkboxes: true,
+        actions: [{
+          label: {{ 'Status'|t('typesense-sync')|json_encode|raw }},
+          actions: [
+            {label: {{ 'On'|t('typesense-sync')|json_encode|raw }}, action: 'typesense-sync/synonyms/toggle', param: 'enabled', value: '1', status: 'enabled'},
+            {label: {{ 'Off'|t('typesense-sync')|json_encode|raw }}, action: 'typesense-sync/synonyms/toggle', param: 'enabled', value: '0', status: 'disabled'},
+          ],
+        }],
+        reorderAction: 'typesense-sync/synonyms/reorder',
+        reorderSuccessMessage: {{ 'New order saved.'|t('typesense-sync')|json_encode|raw }},
+        deleteAction: 'typesense-sync/synonyms/delete',
+        deleteConfirmationMessage: {{ 'Delete the synonym group “{name}”?'|t('typesense-sync')|json_encode|raw }},
+        deleteSuccessMessage: {{ 'Synonym group deleted.'|t('typesense-sync')|json_encode|raw }},
+      });
+    {% endjs %}
+  {% endif %}
 {% endblock %}

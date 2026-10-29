@@ -82,11 +82,11 @@ abstract class SectionController extends Controller
 
     /**
      * Put a collection's rows in the order given, then push. Takes `ids` as a list or as the JSON
-     * Craft's admin table posts.
+     * Craft's admin table posts; the table posts no `collection`, so without one it is the first
+     * row's.
      */
     public function actionReorder(): ?Response
     {
-        $collection = $this->requireCollection((string)$this->request->getRequiredBodyParam('collection'));
         $ids = $this->request->getRequiredBodyParam('ids');
         $ids = is_string($ids) ? json_decode($ids, true) : $ids;
 
@@ -94,38 +94,56 @@ abstract class SectionController extends Controller
             throw new BadRequestHttpException(Craft::t('typesense-sync', 'The new order could not be read.'));
         }
 
+        $ids = array_map('intval', array_values(array_filter($ids, 'is_numeric')));
+        $collection = $this->request->getBodyParam('collection');
+        $collection = $collection !== null || $ids === []
+            ? $this->requireCollection((string)$collection)
+            : $this->requireRow($ids[0])->collection;
+
         if (($refusal = $this->refuseUnconfigured()) !== null) {
             return $refusal;
         }
 
-        self::plugin()->rules->reorder($this->kind(), $collection, array_map('intval', array_filter($ids, 'is_numeric')));
+        self::plugin()->rules->reorder($this->kind(), $collection, $ids);
 
         return $this->goLive($collection, Craft::t('typesense-sync', 'New order saved.'));
     }
 
     /**
-     * Switch one row on or off, then push. Flips it unless `enabled` is posted.
+     * Switch rows on or off, then push once. Takes one `id`, or the `ids` of the admin table's
+     * Status action, all in one collection; flips one row unless `enabled` is posted.
      */
     public function actionToggle(): ?Response
     {
-        $row = $this->requireRow((int)$this->request->getRequiredBodyParam('id'));
+        $ids = $this->request->getBodyParam('ids');
+        $rows = array_map(
+            fn(mixed $id) => $this->requireRow((int)$id),
+            is_array($ids) ? array_values(array_filter($ids, 'is_numeric')) : [$this->request->getRequiredBodyParam('id')],
+        );
+
+        if ($rows === [] || count(array_unique(array_map(fn(Rule|SynonymGroup $row) => $row->collection, $rows))) > 1) {
+            throw new BadRequestHttpException(Craft::t('typesense-sync', 'Choose rows from one collection.'));
+        }
 
         if (($refusal = $this->refuseUnconfigured()) !== null) {
             return $refusal;
         }
 
         $enabled = $this->request->getBodyParam('enabled');
-        $row->enabled = $enabled === null ? !$row->enabled : (bool)$enabled;
         $rules = self::plugin()->rules;
-        $saved = $row instanceof Rule ? $rules->saveRule($row) : $rules->saveSynonymGroup($row);
 
-        if (!$saved) {
-            return $this->asFailure(implode(' ', $row->getFirstErrors()) ?: Craft::t('typesense-sync', 'Could not save it.'));
+        foreach ($rows as $row) {
+            $row->enabled = $enabled === null || $enabled === '' ? !$row->enabled : (bool)$enabled;
+            $saved = $row instanceof Rule ? $rules->saveRule($row) : $rules->saveSynonymGroup($row);
+
+            if (!$saved) {
+                return $this->asFailure(implode(' ', $row->getFirstErrors()) ?: Craft::t('typesense-sync', 'Could not save it.'));
+            }
         }
 
-        return $this->goLive($row->collection, $row->enabled
+        return $this->goLive($rows[0]->collection, $rows[0]->enabled
             ? Craft::t('typesense-sync', 'Switched on.')
-            : Craft::t('typesense-sync', 'Switched off.'), ['enabled' => $row->enabled]);
+            : Craft::t('typesense-sync', 'Switched off.'), ['enabled' => $rows[0]->enabled]);
     }
 
     /**
@@ -234,7 +252,48 @@ abstract class SectionController extends Controller
             'collections' => array_keys(self::plugin()->targets->getSettings()->getCollectionConfigs()),
             'kind' => $this->kind(),
             'state' => $state,
+            'banner' => self::banner($state),
             'sectionUri' => TypesenseSync::SECTION_URI,
+        ];
+    }
+
+    /**
+     * The state banner's lines (§4 States), nothing while both sets are in step. `push` is whether
+     * *Push now* can help: never while Typesense cannot be asked.
+     *
+     * @param array<string, array{state: string, exists: bool, linked: bool, differs: int, message: ?string}> $state
+     * @return array{lines: list<array{kind: string, state: string, text: string}>, push: bool}
+     */
+    public static function banner(array $state): array
+    {
+        $lines = [];
+        $unknown = array_filter($state, fn(array $row) => $row['state'] === Rules::STATE_UNKNOWN);
+
+        // The same failure for both sets is one line, not two.
+        if ($unknown !== [] && count(array_unique(array_map(fn(array $row) => (string)$row['message'], $unknown))) === 1) {
+            $lines[] = ['kind' => '', 'state' => Rules::STATE_UNKNOWN, 'text' => Craft::t('typesense-sync', 'Can’t check whether search is up to date — Typesense is unreachable: {message}', [
+                'message' => (string)reset($unknown)['message'],
+            ])];
+            $state = array_diff_key($state, $unknown);
+        }
+
+        foreach ($state as $kind => $row) {
+            $what = $kind === Rules::KIND_RULES ? Craft::t('typesense-sync', 'Rules') : Craft::t('typesense-sync', 'Synonyms');
+            $text = match ($row['state']) {
+                Rules::STATE_UNKNOWN => Craft::t('typesense-sync', 'Can’t check {what} — Typesense is unreachable: {message}', ['what' => mb_strtolower($what), 'message' => (string)$row['message']]),
+                Rules::STATE_NOT_LIVE => Craft::t('typesense-sync', '{what} are saved but not live yet ({reason}). They go live on the next save, or now with Push now.', ['what' => $what, 'reason' => Rules::describeState($row)]),
+                Rules::STATE_OUT_OF_STEP => Craft::t('typesense-sync', '{what} are out of step: {reason} from what Craft holds, usually after an edit in the Typesense dashboard. The next save, or Push now, puts Craft’s version back.', ['what' => $what, 'reason' => Rules::describeState($row)]),
+                default => null,
+            };
+
+            if ($text !== null) {
+                $lines[] = ['kind' => (string)$kind, 'state' => $row['state'], 'text' => $text];
+            }
+        }
+
+        return [
+            'lines' => $lines,
+            'push' => array_filter($lines, fn(array $line) => $line['state'] !== Rules::STATE_UNKNOWN) !== [],
         ];
     }
 

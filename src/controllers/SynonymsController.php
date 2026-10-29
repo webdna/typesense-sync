@@ -37,8 +37,19 @@ class SynonymsController extends SectionController
 
         $collection = $this->requireCollection($collection);
 
+        $groups = self::plugin()->rules->getSynonymGroups($collection);
+
         return $this->renderTemplate('typesense-sync/synonyms/_index.twig', [
-            'groups' => self::plugin()->rules->getSynonymGroups($collection),
+            'groups' => $groups,
+            'tableData' => array_map(fn(SynonymGroup $group) => [
+                'id' => $group->id,
+                'title' => $group->isOneWay() ? (string)$group->root : implode(', ', $group->words),
+                'url' => RulesController::tabUrl($group->collection, Rules::KIND_SYNONYMS) . '/' . $group->id,
+                'type' => $group->isOneWay() ? Craft::t('typesense-sync', 'One way') : Craft::t('typesense-sync', 'All equal'),
+                'words' => $group->isOneWay() ? implode(', ', $group->words) : '',
+                'status' => $group->enabled ? 'on' : 'off',
+                'statusLabel' => $group->enabled ? Craft::t('typesense-sync', 'On') : Craft::t('typesense-sync', 'Off'),
+            ], $groups),
         ] + $this->tabVariables($collection));
     }
 
@@ -87,6 +98,15 @@ class SynonymsController extends SectionController
         $group->root = $type === self::TYPE_ONE_WAY && $root !== '' ? $root : null;
         $group->words = SynonymGroup::normaliseWords(self::words($this->request->getBodyParam('words', $group->words)));
         $group->enabled = (bool)$this->request->getBodyParam('enabled', $group->enabled);
+
+        // One way chosen with no main term is refused, not quietly saved as all equal (BR-10). An
+        // empty root keeps the form on One way.
+        if ($type === self::TYPE_ONE_WAY && $root === '') {
+            $group->root = '';
+            $group->addError('root', Craft::t('typesense-sync', 'Enter the main term, or choose All equal.'));
+
+            return $this->asModelFailure($group, Craft::t('typesense-sync', 'Couldn’t save the synonym group.'), 'group');
+        }
 
         if (!self::plugin()->rules->saveSynonymGroup($group)) {
             return $this->asModelFailure($group, Craft::t('typesense-sync', 'Couldn’t save the synonym group.'), 'group');

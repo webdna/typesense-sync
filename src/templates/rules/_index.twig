@@ -1,10 +1,60 @@
-{# A collection's Rules tab. Task 3.2 makes this the admin table. #}
+{#
+  A collection's Rules tab: Craft's admin table, drag to reorder (the higher rule wins, BR-5),
+  delete, and a Status action to switch rules on or off. Each row comes from
+  RulesController::tableRow(); the status reads On, Off, Scheduled or Ended (BR-11). Every change
+  pushes the whole set (BR-4).
+
+  Test hooks: data-ts-rules on the table, data-ts-empty="rules" on the empty state.
+#}
 {% extends 'typesense-sync/_section/layout.twig' %}
 
-{% block content %}
-  <ol data-ts-rules>
-    {% for rule in rules %}
-      <li data-id="{{ rule.id }}"><a href="{{ cpUrl(sectionUri ~ '/' ~ collection ~ '/rules/' ~ rule.id) }}">{{ rule.query }}</a></li>
-    {% endfor %}
-  </ol>
+{% set newUrl = cpUrl(sectionUri ~ '/' ~ collection ~ '/rules/new') %}
+
+{% block actionButton %}
+  <a href="{{ newUrl }}" class="btn submit add icon">{{ 'New rule'|t('typesense-sync') }}</a>
+{% endblock %}
+
+{% block tab %}
+  {% if tableData is empty %}
+    <div class="zilch" data-ts-empty="rules">
+      <p>{{ 'A rule decides what a search shows: when someone searches a term, the entries you pin come first, in your order, and the entries you hide never appear.'|t('typesense-sync') }}</p>
+      <p><a href="{{ newUrl }}" class="btn submit add icon">{{ 'New rule'|t('typesense-sync') }}</a></p>
+    </div>
+  {% else %}
+    <div id="ts-rules" data-ts-rules></div>
+
+    {% do view.registerAssetBundle('craft\\web\\assets\\admintable\\AdminTableAsset') %}
+    {% js %}
+      const statuses = {on: 'enabled', off: 'disabled', scheduled: 'pending', ended: 'expired'};
+      new Craft.VueAdminTable({
+        container: '#ts-rules',
+        tableData: {{ tableData|json_encode|raw }},
+        columns: [
+          {name: '__slot:title', title: {{ 'Search term'|t('typesense-sync')|json_encode|raw }}},
+          {name: 'match', title: {{ 'Match'|t('typesense-sync')|json_encode|raw }}},
+          {name: 'pins', title: {{ 'Pinned'|t('typesense-sync')|json_encode|raw }}},
+          {name: 'hides', title: {{ 'Hidden'|t('typesense-sync')|json_encode|raw }}},
+          {
+            name: 'status',
+            title: {{ 'Status'|t('typesense-sync')|json_encode|raw }},
+            callback: (value, row) => `<span class="status ${statuses[value] ?? ''}" aria-hidden="true"></span>${Craft.escapeHtml(row.statusLabel)}`,
+          },
+          {name: 'dates', title: {{ 'Dates'|t('typesense-sync')|json_encode|raw }}},
+        ],
+        checkboxes: true,
+        actions: [{
+          label: {{ 'Status'|t('typesense-sync')|json_encode|raw }},
+          actions: [
+            {label: {{ 'On'|t('typesense-sync')|json_encode|raw }}, action: 'typesense-sync/rules/toggle', param: 'enabled', value: '1', status: 'enabled'},
+            {label: {{ 'Off'|t('typesense-sync')|json_encode|raw }}, action: 'typesense-sync/rules/toggle', param: 'enabled', value: '0', status: 'disabled'},
+          ],
+        }],
+        reorderAction: 'typesense-sync/rules/reorder',
+        reorderSuccessMessage: {{ 'New order saved.'|t('typesense-sync')|json_encode|raw }},
+        deleteAction: 'typesense-sync/rules/delete',
+        deleteConfirmationMessage: {{ 'Delete the rule for “{name}”?'|t('typesense-sync')|json_encode|raw }},
+        deleteSuccessMessage: {{ 'Rule deleted.'|t('typesense-sync')|json_encode|raw }},
+      });
+    {% endjs %}
+  {% endif %}
 {% endblock %}

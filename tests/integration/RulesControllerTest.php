@@ -26,6 +26,8 @@ use craft\web\TemplateResponseBehavior;
 use craft\web\twig\variables\Cp;
 use craft\web\UrlManager;
 use craft\web\UrlRule;
+use craft\web\View;
+use DateTime;
 use Throwable;
 use Typesense\Client as TypesenseClient;
 use webdna\typesensesync\jobs\PushRules;
@@ -38,6 +40,7 @@ use webdna\typesensesync\services\Rules;
 use webdna\typesensesync\tests\fixtures\formatters\DocumentFormatter;
 use webdna\typesensesync\tests\Support\TestCollections;
 use webdna\typesensesync\TypesenseSync;
+use webdna\typesensesync\web\SectionController;
 use yii\base\Event;
 use yii\web\BadRequestHttpException;
 use yii\web\ForbiddenHttpException;
@@ -371,7 +374,252 @@ class RulesControllerTest extends Unit
         $this->assertSame(['content', 'other'], array_column($variables['collections'], 'handle'));
     }
 
+    // 3.2 Screens ------------------------------------------------------------------------------
+
+    public function testEveryScreenRendersInTheCp(): void
+    {
+        $user = $this->user(['accessCp', TypesenseSync::PERMISSION_RULES]);
+        $hooks = [
+            'rules/index' => 'data-ts-empty="rules"',
+            'synonyms/index' => 'data-ts-empty="synonyms"',
+        ];
+
+        // Empty states first, then every screen with a row in it.
+        foreach ($hooks as $route => $hook) {
+            $this->assertStringContainsString($hook, $this->render($this->dispatch($route, ['collection' => 'content'], $user, ['method' => 'GET'])));
+        }
+
+        $rule = $this->savedRule('garden');
+        $group = $this->savedGroup(['care home', 'nursing home']);
+        $this->plugin->rules->push('content');
+        $expected = [
+            'rules/index' => 'data-ts-rules',
+            'rules/edit' => 'data-ts-picker="pins"',
+            'synonyms/index' => 'data-ts-synonyms',
+            'synonyms/edit' => 'data-ts-form="synonyms"',
+        ];
+
+        foreach ($this->screens($rule, $group) as [$route, $params]) {
+            if (!isset($expected[$route])) {
+                continue;
+            }
+
+            $html = $this->render($this->dispatch($route, $params, $user, ['method' => 'GET']));
+            $this->assertStringContainsString($expected[$route], $html, $route);
+            $this->assertStringNotContainsString('data-ts-banner', $html, $route . ': in step, so no banner');
+        }
+
+        $this->useSettings($this->settings(['collections' => ['content' => [], 'other' => []]]));
+        $html = $this->render($this->dispatch('rules/collections', [], $user, ['method' => 'GET']));
+        $this->assertStringContainsString('data-collection="other"', $html);
+        $html = $this->render($this->dispatch('rules/index', ['collection' => 'content'], $user, ['method' => 'GET']));
+        $this->assertStringContainsString('typesense/other/rules', $html, 'the collection switcher');
+    }
+
+    public function testTheRulesTabNamesEachStatusAndAScheduledRuleSaysSo(): void
+    {
+        $user = $this->user(['accessCp', TypesenseSync::PERMISSION_RULES]);
+        $entry = $this->saveEntry('Hall');
+        $tomorrow = ['date' => (new DateTime('+1 day'))->format('n/j/Y'), 'time' => '9:00 AM', 'timezone' => 'UTC'];
+
+        // TS-2 step 3: Starts tomorrow reads Scheduled.
+        $this->dispatch('rules/save', ['collection' => 'content', 'query' => 'hall', 'matchType' => Rule::MATCH_EXACT, 'pins' => [$entry->id], 'effectiveFrom' => $tomorrow], $user);
+        $ended = $this->savedRule('garden');
+        $ended->effectiveTo = new DateTime('-1 day');
+        $this->assertTrue($this->plugin->rules->saveRule($ended));
+        $off = $this->savedRule('pool');
+        $this->dispatch('rules/toggle', ['id' => $off->id], $user);
+
+        $rows = $this->variables($this->dispatch('rules/index', ['collection' => 'content'], $user, ['method' => 'GET']))['tableData'];
+
+        $this->assertSame(
+            ['hall' => 'Scheduled', 'garden' => 'Ended', 'pool' => 'Off'],
+            array_combine(array_column($rows, 'title'), array_column($rows, 'statusLabel')),
+        );
+        $this->assertStringStartsWith('from ', $rows[0]['dates']);
+        $this->assertSame([1, 0], [$rows[0]['pins'], $rows[0]['hides']]);
+    }
+
+    public function testTheBannerShowsDriftAndTheNextSaveClearsIt(): void
+    {
+        $user = $this->user(['accessCp', TypesenseSync::PERMISSION_RULES]);
+        $rule = $this->savedRule('garden');
+        $this->plugin->rules->push('content');
+        // TS-6 step 1: an item changed in the dashboard.
+        $this->admin->curationSets->upsert($this->prefix . 'content_rules', ['items' => [
+            ['id' => 'rule-0001', 'rule' => ['query' => 'lawn', 'match' => 'exact'], 'excludes' => [['id' => '999']]],
+        ]]);
+
+        // Step 2: out of step, 1 item differs, with Push now, on either tab.
+        $response = $this->dispatch('synonyms/index', ['collection' => 'content'], $user, ['method' => 'GET']);
+        $banner = $this->variables($response)['banner'];
+        $this->assertSame([[Rules::KIND_RULES, Rules::STATE_OUT_OF_STEP]], array_map(fn($line) => [$line['kind'], $line['state']], $banner['lines']));
+        $this->assertStringContainsString('1 item differs', $banner['lines'][0]['text']);
+        $this->assertTrue($banner['push']);
+        $html = $this->render($response);
+        $this->assertStringContainsString('data-state="out-of-step"', $html);
+        $this->assertStringContainsString('data-ts-action="push"', $html);
+
+        // Step 3: any save puts Craft's version back.
+        $this->dispatch('rules/save', ['ruleId' => $rule->id, 'query' => 'garden'], $user);
+        $this->assertSame([], $this->variables($this->dispatch('rules/index', ['collection' => 'content'], $user, ['method' => 'GET']))['banner']['lines']);
+    }
+
+    public function testAnUnreachableClusterShowsOneCantCheckLineAndNoPushNow(): void
+    {
+        $user = $this->user(['accessCp', TypesenseSync::PERMISSION_RULES]);
+        $this->savedRule('garden');
+        $this->useSettings($this->settings(['port' => '1', 'connectTimeout' => 1, 'timeout' => 1]));
+
+        // TS-10 step 1: rules listed, "Can't check", nothing to push to.
+        $response = $this->dispatch('rules/index', ['collection' => 'content'], $user, ['method' => 'GET']);
+        $variables = $this->variables($response);
+
+        $this->assertSame(['garden'], array_column($variables['tableData'], 'title'));
+        $this->assertCount(1, $variables['banner']['lines'], 'one line for one failure');
+        $this->assertSame(Rules::STATE_UNKNOWN, $variables['banner']['lines'][0]['state']);
+        $this->assertStringStartsWith('Can’t check', $variables['banner']['lines'][0]['text']);
+        $this->assertFalse($variables['banner']['push']);
+        $this->assertStringNotContainsString('data-ts-action="push"', $this->render($response));
+    }
+
+    public function testEachStateHasItsBannerLine(): void
+    {
+        $row = fn(string $state, array $values = []) => $values + ['state' => $state, 'name' => 'x', 'exists' => true, 'linked' => true, 'differs' => 0, 'message' => null];
+
+        $this->assertSame(['lines' => [], 'push' => false], SectionController::banner([
+            Rules::KIND_RULES => $row(Rules::STATE_IN_STEP),
+            Rules::KIND_SYNONYMS => $row(Rules::STATE_IN_STEP),
+        ]));
+
+        $banner = SectionController::banner([
+            Rules::KIND_RULES => $row(Rules::STATE_NOT_LIVE, ['linked' => false]),
+            Rules::KIND_SYNONYMS => $row(Rules::STATE_OUT_OF_STEP, ['differs' => 2]),
+        ]);
+        $this->assertSame(
+            ['Rules are saved but not live yet (not linked). They go live on the next save, or now with Push now.', 'Synonyms are out of step: 2 items differ from what Craft holds, usually after an edit in the Typesense dashboard. The next save, or Push now, puts Craft’s version back.'],
+            array_column($banner['lines'], 'text'),
+        );
+        $this->assertTrue($banner['push']);
+
+        // Two different failures are a line each.
+        $banner = SectionController::banner([
+            Rules::KIND_RULES => $row(Rules::STATE_UNKNOWN, ['message' => 'one']),
+            Rules::KIND_SYNONYMS => $row(Rules::STATE_UNKNOWN, ['message' => 'two']),
+        ]);
+        $this->assertSame([Rules::KIND_RULES, Rules::KIND_SYNONYMS], array_column($banner['lines'], 'kind'));
+        $this->assertFalse($banner['push']);
+    }
+
+    /**
+     * TN-2, TN-3, TN-6, TN-16 and BR-10 (TN-7, and one way with no main term) through the forms:
+     * each refused, with its error on the field the screen shows, and nothing written.
+     */
+    public function testEachInvalidFormIsRefusedOnItsField(): void
+    {
+        $user = $this->user(['accessCp', TypesenseSync::PERMISSION_RULES]);
+        $entry = $this->saveEntry('Garden room');
+        $this->savedRule('garden');
+        $many = array_map(fn(int $i) => (int)$this->saveEntry('Room ' . $i)->id, range(1, 21));
+        $date = fn(string $when) => ['date' => (new DateTime($when))->format('n/j/Y'), 'time' => '9:00 AM', 'timezone' => 'UTC'];
+        $rule = fn(array $body) => $body + ['collection' => 'content', 'query' => 'lawn', 'matchType' => Rule::MATCH_EXACT, 'pins' => [$entry->id]];
+
+        $cases = [
+            'TN-2 case differs' => ['rules/save', $rule(['query' => 'GARDEN']), 'query'],
+            'TN-3 21 pins' => ['rules/save', $rule(['pins' => $many]), 'pins'],
+            'TN-3 pinned and hidden' => ['rules/save', $rule(['hides' => [$entry->id]]), 'pins'],
+            'TN-6 ends before starts' => ['rules/save', $rule(['effectiveFrom' => $date('+2 days'), 'effectiveTo' => $date('+1 day')]), 'effectiveTo'],
+            'TN-16 256 characters' => ['rules/save', $rule(['query' => str_repeat('a', 256)]), 'query'],
+            'TN-16 only spaces' => ['rules/save', $rule(['query' => '   ']), 'query'],
+            'TN-7 one word' => ['synonyms/save', ['collection' => 'content', 'words' => [['word' => 'care home']]], 'words'],
+            'TN-7 51 words' => ['synonyms/save', ['collection' => 'content', 'words' => array_map(fn(int $i) => ['word' => 'w' . $i], range(1, 51))], 'words'],
+            'one way, no main term' => ['synonyms/save', ['collection' => 'content', 'type' => 'oneWay', 'root' => ' ', 'words' => [['word' => 'a'], ['word' => 'b']]], 'root'],
+        ];
+
+        foreach ($cases as $name => [$route, $body, $field]) {
+            $response = $this->dispatch($route, $body, $user);
+            $this->assertSame(400, $response->getStatusCode(), $name);
+            $this->assertArrayHasKey($field, $response->data['errors'] ?? [], $name);
+        }
+
+        $this->assertSame(1, (int)RuleRecord::find()->count(), 'nothing written');
+        $this->assertSame(0, (int)SynonymRecord::find()->count(), 'nothing written');
+
+        // A failed form comes back with its values and the error under the field.
+        $failed = new Rule(['collection' => 'content', 'query' => 'GARDEN', 'pins' => [$entry->id]]);
+        $failed->addError('query', 'This collection already has a rule for “GARDEN” with this match.');
+        $html = $this->render($this->dispatch('rules/edit', ['collection' => 'content', 'rule' => $failed], $user, ['method' => 'GET']));
+        $this->assertStringContainsString('already has a rule for “GARDEN”', $html);
+        $this->assertStringContainsString('value="GARDEN"', $html);
+
+        $group = new SynonymGroup(['collection' => 'content', 'words' => ['a', 'b']]);
+        // As the controller leaves it; Craft's constructor would typecast '' to null.
+        $group->root = '';
+        $group->addError('root', 'Enter the main term, or choose All equal.');
+        $html = $this->render($this->dispatch('synonyms/edit', ['collection' => 'content', 'group' => $group], $user, ['method' => 'GET']));
+        $this->assertStringContainsString('Enter the main term', $html);
+        $this->assertStringNotContainsString('id="ts-type-oneWay" class="hidden"', $html, 'the form stays on One way');
+    }
+
+    /**
+     * BR-8: the pickers offer exactly the sections feeding the collection, and pins posted by
+     * several pickers arrive as one list in picker order.
+     */
+    public function testThePickersOfferOnlyTheCollectionsSources(): void
+    {
+        $user = $this->user(['accessCp', TypesenseSync::PERMISSION_RULES]);
+        $other = $this->createSection('other');
+        $a = $this->saveEntry('Garden room');
+        $b = $this->saveEntry('Garden hall');
+
+        $pickers = $this->plugin->rules->pickers('content');
+
+        $this->assertSame([Entry::class], array_column($pickers, 'elementType'));
+        $this->assertSame(['section:' . $this->news->uid], $pickers[0]['sources'], 'not section:' . $other->uid);
+        $this->assertSame(Craft::$app->getSites()->getPrimarySite()->id, $pickers[0]['siteId']);
+
+        $response = $this->dispatch('rules/save', ['collection' => 'content', 'query' => 'garden', 'matchType' => Rule::MATCH_EXACT, 'pins' => [['', $b->id, $a->id], ''], 'hides' => ['']], $user);
+        $this->assertTrue($response->data['live'] ?? null);
+        $rule = $this->plugin->rules->getRules('content')[0];
+        $this->assertSame([$b->id, $a->id], $rule->pins);
+
+        $variables = $this->variables($this->dispatch('rules/edit', ['collection' => 'content', 'ruleId' => $rule->id], $user, ['method' => 'GET']));
+        $this->assertSame([$b->id, $a->id], array_map(fn(Entry $entry) => $entry->id, $variables['pickers'][0]['pinned']), 'shown in pin order');
+    }
+
+    /**
+     * The admin table posts reorder as `ids` alone and its Status action as `ids[]` + `enabled`.
+     */
+    public function testTheAdminTablesPostsWork(): void
+    {
+        $user = $this->user(['accessCp', TypesenseSync::PERMISSION_RULES]);
+        $a = $this->savedRule('garden');
+        $b = $this->savedRule('hall');
+        $this->plugin->rules->push('content');
+
+        $this->dispatch('rules/reorder', ['ids' => json_encode([(string)$b->id, (string)$a->id]), 'startPosition' => 1], $user);
+        $this->assertSame(['hall', 'garden'], $this->setQueries());
+
+        $response = $this->dispatch('rules/toggle', ['ids' => [$a->id, $b->id], 'enabled' => '0'], $user);
+        $this->assertFalse($response->data['enabled']);
+        $this->assertSame([], $this->setQueries(), 'both off, one push');
+
+        $this->dispatch('rules/toggle', ['ids' => [$a->id], 'enabled' => '1'], $user);
+        $this->assertSame(['garden'], $this->setQueries());
+    }
+
     // Helpers ----------------------------------------------------------------------------------
+
+    /**
+     * The screen a response would show, rendered as the CP renders it.
+     */
+    private function render(Response $response): string
+    {
+        $template = $this->template($response);
+        $this->assertNotNull($template);
+
+        return Craft::$app->getView()->renderTemplate($template, $this->variables($response), View::TEMPLATE_MODE_CP);
+    }
 
     /**
      * The GET screens, each with the route params its URL rule gives it.

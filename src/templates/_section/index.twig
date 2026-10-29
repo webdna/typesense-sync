@@ -1,19 +1,55 @@
-{# The declared collections; with one, the section opens straight on it. #}
+{#
+  The declared collections with their rule and synonym counts and the state of each set; with one
+  collection the section opens straight on it (RulesController::actionCollections()).
+
+  Test hooks: data-ts-section="empty|collections", data-collection="<handle>" on each row,
+  data-ts-set="<kind>" with data-ts-set-state on each state.
+#}
 {% extends '_layouts/cp' %}
 
 {% set title = 'Typesense'|t('typesense-sync') %}
+{% set stateLabels = {
+  'in-step': 'In step'|t('typesense-sync'),
+  'not-live': 'Not live yet'|t('typesense-sync'),
+  'out-of-step': 'Out of step'|t('typesense-sync'),
+  'unknown': 'Can’t check'|t('typesense-sync'),
+} %}
+{% set stateClasses = {'in-step': 'enabled', 'not-live': 'pending', 'out-of-step': 'pending', 'unknown': 'disabled'} %}
 
 {% block content %}
   {% if collections is empty %}
-    <p data-ts-section="empty">
-      {{ 'No collections are declared in config/typesense-sync.php.'|t('typesense-sync') }}
-      <a href="{{ cpUrl(utilityUrl) }}">{{ 'See the Typesense Sync utility.'|t('typesense-sync') }}</a>
-    </p>
+    <div class="zilch" data-ts-section="empty">
+      <p>{{ 'No collections are declared in config/typesense-sync.php.'|t('typesense-sync') }}</p>
+      <p><a href="{{ cpUrl(utilityUrl) }}">{{ 'See the Typesense Sync utility.'|t('typesense-sync') }}</a></p>
+    </div>
   {% else %}
-    <ul data-ts-section="collections">
-      {% for item in collections %}
-        <li data-collection="{{ item.handle }}"><a href="{{ item.url }}">{{ item.handle }}</a></li>
-      {% endfor %}
-    </ul>
+    <table class="data fullwidth" data-ts-section="collections">
+      <thead>
+        <tr>
+          <th scope="col">{{ 'Collection'|t('typesense-sync') }}</th>
+          <th scope="col">{{ 'Rules'|t('typesense-sync') }}</th>
+          <th scope="col">{{ 'Synonyms'|t('typesense-sync') }}</th>
+          <th scope="col">{{ 'In search'|t('typesense-sync') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in collections %}
+          <tr data-collection="{{ item.handle }}">
+            <th scope="row"><a href="{{ item.url }}">{{ item.handle }}</a></th>
+            <td>{{ item.rules }}</td>
+            <td>{{ item.synonyms }}</td>
+            <td>
+              {% for kind, row in item.state %}
+                <span class="flex flex-nowrap" data-ts-set="{{ kind }}" data-ts-set-state="{{ row.state }}">
+                  <span class="status {{ stateClasses[row.state] ?? '' }}" aria-hidden="true"></span>
+                  {{ kind == 'rules' ? 'Rules'|t('typesense-sync') : 'Synonyms'|t('typesense-sync') }}:
+                  {{ stateLabels[row.state] ?? row.state }}
+                </span>
+              {% endfor %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   {% endif %}
 {% endblock %}
