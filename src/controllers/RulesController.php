@@ -131,6 +131,7 @@ class RulesController extends SectionController
 
         $rule->query = trim((string)$this->request->getBodyParam('query', $rule->query));
         $rule->matchType = (string)$this->request->getBodyParam('matchType', $rule->matchType);
+        $rule->matchSynonyms = (bool)$this->request->getBodyParam('matchSynonyms', $rule->matchSynonyms);
         $rule->pins = Rule::normaliseIds(self::ids($this->request->getBodyParam('pins', $rule->pins)));
         $rule->hides = Rule::normaliseIds(self::ids($this->request->getBodyParam('hides', $rule->hides)));
         $rule->effectiveFrom = self::date($this->request->getBodyParam('effectiveFrom'), $rule->effectiveFrom);

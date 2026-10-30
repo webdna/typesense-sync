@@ -45,6 +45,7 @@ class Install extends Migration
                 'sortOrder' => $this->smallInteger()->unsigned()->notNull(),
                 'query' => $this->string(255)->notNull(),
                 'matchType' => $this->enum('matchType', Rule::MATCH_TYPES)->notNull(),
+                'matchSynonyms' => $this->boolean()->notNull()->defaultValue(false),
                 'pins' => $this->json(),
                 'hides' => $this->json(),
                 'effectiveFrom' => $this->dateTime(),

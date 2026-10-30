@@ -4,7 +4,7 @@
 
 ### Added
 - A **Typesense** section in the control panel, with a page per declared collection, where editors manage rules and synonyms. It needs the new *Manage Typesense rules* permission and appears only while the connection is configured.
-- Rules: for a search term, matched exactly or contained, pin up to 20 entries in order and hide up to 100, with optional start and end dates. Drag to set which rule wins, and switch a rule off without deleting it. Pinned entries still obey the search key's publication window and filters.
+- Rules: for a search term, matched exactly or contained, pin up to 20 entries in order and hide up to 100, with optional start and end dates. *Also match synonyms* makes a rule fire for its term's synonyms too. Drag to set which rule wins, and switch a rule off without deleting it. Pinned entries still obey the search key's publication window and filters.
 - Synonym groups: all equal, or one way from a main term.
 - Craft holds the rules and Typesense holds a copy. The plugin owns one curation set and one synonym set per collection, pushes them on every save, links them to every collection version it builds, and keeps any set someone linked by hand. An edit saved while Typesense is unreachable is kept and pushed again from the queue.
 - Each collection shows whether Typesense matches Craft (not live yet, or out of step after a dashboard edit), in the section, the utility and `collections/status`. `collections/apply` and `setup` put Craft's version back.

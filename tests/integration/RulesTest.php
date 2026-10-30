@@ -186,6 +186,33 @@ class RulesTest extends Unit
         $this->assertSame([], $this->liveItems(Rules::KIND_SYNONYMS));
     }
 
+    public function testAlsoMatchSynonymsFiresTheRuleForASynonym(): void
+    {
+        // TS-12 step 1 (BR-23): off, the key is not sent and a synonym does not fire the rule.
+        $a = $this->indexedEntry('Garden A');
+        $b = $this->indexedEntry('Nursing home guide');
+        $group = new SynonymGroup(['collection' => 'content', 'words' => ['care home', 'nursing home']]);
+        $this->assertTrue($this->rules()->saveSynonymGroup($group), implode(' ', $group->getFirstErrors()));
+        $rule = $this->saveRule('care home', Rule::MATCH_EXACT, pins: [$a->id]);
+        $this->assertNull($this->rules()->pushOrQueue('content'));
+        $this->assertEquals(['query' => 'care home', 'match' => 'exact'], $this->liveItems(Rules::KIND_RULES)[0]['rule'], 'no synonyms key');
+        $this->assertSame((string)$a->id, $this->search('care home')[0]);
+        $this->assertSame([(string)$b->id], $this->search('nursing home'));
+
+        // Step 2.
+        $rule->matchSynonyms = true;
+        $this->assertTrue($this->rules()->saveRule($rule));
+        $this->assertNull($this->rules()->pushOrQueue('content'));
+        $this->assertSame(['query' => 'care home', 'match' => 'exact', 'synonyms' => true], $this->rules()->desiredSet('content', Rules::KIND_RULES)['items'][0]['rule']);
+        $this->assertSame([(string)$a->id, (string)$b->id], $this->search('nursing home'));
+
+        // Step 3: 30.0 leaves the option out of its read, and the set is still in step.
+        $this->assertArrayNotHasKey('synonyms', $this->liveItems(Rules::KIND_RULES)[0]['rule']);
+        $this->assertSame(Rules::STATE_IN_STEP, $this->rules()->state('content')[Rules::KIND_RULES]['state']);
+        $this->assertFalse($this->rules()->apply('content')['pushed']);
+        $this->assertFalse($this->rules()->apply('content')['pushed']);
+    }
+
     public function testAPinnedEntryOutsideTheKeysWindowIsNeverShown(): void
     {
         // TS-11: indexed, but not yet published.

@@ -100,6 +100,7 @@ class RulesTransfer extends Component
             $exported[] = [
                 'query' => $rule->query,
                 'matchType' => $rule->matchType,
+                'matchSynonyms' => $rule->matchSynonyms,
                 'pins' => $refs['pins'],
                 'hides' => $refs['hides'],
                 'effectiveFrom' => self::formatDate($rule->effectiveFrom),
@@ -213,6 +214,7 @@ class RulesTransfer extends Component
                 'collection' => $collection,
                 'query' => $row['query'],
                 'matchType' => $row['matchType'],
+                'matchSynonyms' => $row['matchSynonyms'] ?? false,
                 'pins' => $ids['pins'],
                 'hides' => $ids['hides'],
                 'effectiveFrom' => self::parseDate($row['effectiveFrom']),
@@ -267,10 +269,10 @@ class RulesTransfer extends Component
      * again after a failure adopts nothing twice.
      *
      * @param string $kind Rules::KIND_RULES for a curation set, Rules::KIND_SYNONYMS for a synonym set.
-     * @return array{rules: int, synonyms: int, skipped: list<string>, unlinked: bool, problem: ?string}
+     * @return array{rules: int, synonyms: int, skipped: list<string>, unlinked: bool, problem: ?string, warning: ?string}
      * `unlinked` is whether the live collection linked the source set and no longer does; `problem`
      * says why the run stopped short — the push failed (retry queued) or the unlink did — leaving
-     * the source set linked.
+     * the source set linked; `warning` is set when the server does not report Also match synonyms.
      * @throws InvalidArgumentException when the set does not exist or is the collection's own.
      * @throws SyncException when Typesense cannot be asked for the set.
      * @throws InvalidConfigException when the collection is undeclared.
@@ -342,7 +344,15 @@ class RulesTransfer extends Component
             'skipped' => $skipped,
             'unlinked' => false,
             'problem' => null,
+            'warning' => null,
         ];
+
+        // 30.0 leaves a rule's synonyms out of a read, so the set cannot say which rules had it (BR-18).
+        $rulesRead = array_filter($items, fn(array $item) => is_array($item['rule'] ?? null));
+
+        if ($kind === Rules::KIND_RULES && $rulesRead !== [] && array_filter($rulesRead, fn(array $item) => array_key_exists('synonyms', $item['rule'])) === []) {
+            $result['warning'] = Craft::t('typesense-sync', 'This Typesense server does not report whether a rule also matches synonyms, so every adopted rule has Also match synonyms off. Check them in the control panel.');
+        }
 
         // The owned set goes live before the source is unlinked, so search never runs on neither.
         $result['problem'] = $rules->pushOrQueue($collection);
@@ -398,8 +408,9 @@ class RulesTransfer extends Component
 
         $rule = is_array($item['rule'] ?? null) ? $item['rule'] : [];
 
-        foreach (array_keys($rule) as $key) {
-            if ($key !== 'query' && $key !== 'match') {
+        foreach ($rule as $key => $value) {
+            // Also match synonyms is simple (BR-23); normalising has already dropped a false one.
+            if ($key !== 'query' && $key !== 'match' && !($key === 'synonyms' && $value === true)) {
                 $options[] = 'rule.' . $key;
             }
         }
@@ -474,6 +485,7 @@ class RulesTransfer extends Component
             'collection' => $collection,
             'query' => $query,
             'matchType' => $item['rule']['match'],
+            'matchSynonyms' => ($item['rule']['synonyms'] ?? false) === true,
             'pins' => $ids['pins'],
             'hides' => $ids['hides'],
             'effectiveFrom' => isset($item['effective_from_ts']) ? new DateTime('@' . $item['effective_from_ts']) : null,
@@ -629,6 +641,11 @@ class RulesTransfer extends Component
     private static function isRule(mixed $rule): bool
     {
         if (!is_array($rule) || !is_string($rule['query'] ?? null) || !is_string($rule['matchType'] ?? null) || !is_bool($rule['enabled'] ?? null)) {
+            return false;
+        }
+
+        // Added in 1.1 within version 1: a file without it reads as off (BR-16).
+        if (array_key_exists('matchSynonyms', $rule) && !is_bool($rule['matchSynonyms'])) {
             return false;
         }
 

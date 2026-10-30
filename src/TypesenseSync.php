@@ -76,7 +76,7 @@ class TypesenseSync extends Plugin
      */
     public const SECTION_URI = 'typesense';
 
-    public string $schemaVersion = '1.1.0';
+    public string $schemaVersion = '1.1.1';
 
     public bool $hasCpSettings = true;
 

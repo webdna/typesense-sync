@@ -631,6 +631,31 @@ class RulesControllerTest extends Unit
         $this->assertSame([$b->id, $a->id], array_map(fn(Entry $entry) => $entry->id, $variables['pickers'][0]['pinned']), 'shown in pin order');
     }
 
+    public function testAlsoMatchSynonymsIsASwitchThatSavesAndReloads(): void
+    {
+        // TS-12's CP half (BR-23).
+        $user = $this->user(['accessCp', TypesenseSync::PERMISSION_RULES]);
+        $entry = $this->saveEntry('Garden room');
+
+        $html = $this->render($this->dispatch('rules/edit', ['collection' => 'content'], $user, ['method' => 'GET']));
+        $this->assertStringContainsString('Also match synonyms', $html);
+        $this->assertMatchesRegularExpression('/<button[^>]*id="matchSynonyms"[^>]*class="lightswitch"/', $html, 'off for a new rule');
+
+        $response = $this->dispatch('rules/save', ['collection' => 'content', 'query' => 'care home', 'matchType' => Rule::MATCH_EXACT, 'matchSynonyms' => '1', 'pins' => [$entry->id]], $user);
+        $this->assertTrue($response->data['live'] ?? null);
+        $rule = $this->plugin->rules->getRules('content')[0];
+        $this->assertTrue($rule->matchSynonyms);
+        $this->assertTrue($this->plugin->rules->desiredSet('content', Rules::KIND_RULES)['items'][0]['rule']['synonyms'] ?? null);
+        $this->assertSame(Rules::STATE_IN_STEP, $this->plugin->rules->state('content')[Rules::KIND_RULES]['state']);
+
+        $html = $this->render($this->dispatch('rules/edit', ['collection' => 'content', 'ruleId' => $rule->id], $user, ['method' => 'GET']));
+        $this->assertMatchesRegularExpression('/<button[^>]*id="matchSynonyms"[^>]*class="lightswitch on"/', $html, 'on when reloaded');
+
+        $this->dispatch('rules/save', ['ruleId' => $rule->id, 'matchSynonyms' => ''], $user);
+        $this->assertFalse($this->plugin->rules->getRuleById((int)$rule->id)?->matchSynonyms);
+        $this->assertArrayNotHasKey('synonyms', $this->plugin->rules->desiredSet('content', Rules::KIND_RULES)['items'][0]['rule']);
+    }
+
     /**
      * The admin table posts reorder as `ids` alone and its Status action as `ids[]` + `enabled`.
      */

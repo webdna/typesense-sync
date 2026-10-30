@@ -312,6 +312,74 @@ class RulesConsoleTest extends Unit
         $this->assertCount(2, $this->plugin->rules->getRules('content'));
     }
 
+    // TS-13 - Also match synonyms travels (BR-16, BR-17, BR-18, BR-23) -----------------------------
+
+    public function testAlsoMatchSynonymsTravelsThroughExportImportAndAdopt(): void
+    {
+        $a = $this->saveEntry('Garden Room');
+        $b = $this->saveEntry('Garden Bath');
+        $this->runQueue();
+        $this->saveRule('care home', Rule::MATCH_EXACT, [$a->id], synonyms: true);
+        $this->saveRule('hall', Rule::MATCH_EXACT, [$b->id]);
+
+        // Step 1.
+        $run = $this->command('rules/export', ['content', 'file' => $this->file]);
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $data = Json::decode((string)file_get_contents($this->file));
+        $this->assertSame([true, false], array_column($data['rules'], 'matchSynonyms'));
+
+        // Step 2.
+        Db::delete(RuleRecord::TABLE);
+        $run = $this->command('rules/import', [$this->file, 'confirm' => 'content']);
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertSame([true, false], array_map(fn(Rule $rule) => $rule->matchSynonyms, $this->plugin->rules->getRules('content')));
+        $items = $this->plugin->rules->desiredSet('content', Rules::KIND_RULES)['items'];
+        $this->assertSame(['query' => 'care home', 'match' => 'exact', 'synonyms' => true], $items[0]['rule']);
+        $this->assertSame(['query' => 'hall', 'match' => 'exact'], $items[1]['rule'], 'off is not sent');
+        $this->assertInStep('the import is pushed');
+
+        // Step 3: the set read back as 30.2 answers, which the 30.0 container cannot.
+        Db::delete(RuleRecord::TABLE);
+        $old = $this->prefix . 'old';
+        $item = ['id' => 'r1', 'rule' => ['query' => 'garden', 'match' => 'exact', 'synonyms' => true], 'includes' => [['id' => (string)$a->id, 'position' => 1]], 'filter_curated_hits' => true, 'stop_processing' => true];
+        $this->admin->curationSets->upsert($old, ['items' => [$item]]);
+        $this->linkToLive('curation_sets', $old);
+        $real = $this->plugin->rules;
+        $this->plugin->set('rules', Stub::construct(Rules::class, [], [
+            'liveSet' => function(string $kind, string $name) use ($real, $old): ?array {
+                $set = $real->liveSet($kind, $name);
+
+                if ($name === $old && $set !== null) {
+                    foreach ($set['items'] as $i => $read) {
+                        $set['items'][$i]['rule'] += ['stem' => false, 'synonyms' => true];
+                    }
+                }
+
+                return $set;
+            },
+        ]));
+
+        try {
+            $run = $this->command('rules/adopt', ['content', 'curationSet' => $old]);
+        } finally {
+            $this->plugin->set('rules', $real);
+        }
+
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertStringContainsString("Adopted 1 rule from $old into content.", $run['out']);
+        $this->assertStringNotContainsString('does not report', $run['err']);
+        $this->assertSame([true], array_map(fn(Rule $rule) => $rule->matchSynonyms, $real->getRules('content')));
+
+        // Step 4: the 30.0 container's own read has no synonyms key.
+        Db::delete(RuleRecord::TABLE);
+        $this->admin->curationSets->upsert($old . '2', ['items' => [$item]]);
+        $this->assertArrayNotHasKey('synonyms', $real->liveSet(Rules::KIND_RULES, $old . '2')['items'][0]['rule'] ?? []);
+        $run = $this->command('rules/adopt', ['content', 'curationSet' => $old . '2']);
+        $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
+        $this->assertSame([false], array_map(fn(Rule $rule) => $rule->matchSynonyms, $real->getRules('content')));
+        $this->assertStringContainsString('This Typesense server does not report whether a rule also matches synonyms', $run['err']);
+    }
+
     public function testAdoptCopiesSynonymGroupsAndSkipsALocale(): void
     {
         $old = $this->prefix . 'oldsyn';
@@ -478,12 +546,13 @@ class RulesConsoleTest extends Unit
      * @param int[] $pins
      * @param int[] $hides
      */
-    private function saveRule(string $query, string $match, array $pins = [], array $hides = [], ?DateTime $from = null, bool $enabled = true): Rule
+    private function saveRule(string $query, string $match, array $pins = [], array $hides = [], ?DateTime $from = null, bool $enabled = true, bool $synonyms = false): Rule
     {
         $rule = new Rule([
             'collection' => 'content',
             'query' => $query,
             'matchType' => $match,
+            'matchSynonyms' => $synonyms,
             'pins' => $pins,
             'hides' => $hides,
             'effectiveFrom' => $from,

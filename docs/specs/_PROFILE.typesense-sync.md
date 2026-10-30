@@ -148,6 +148,10 @@ docker compose run --rm php composer validate --strict --no-plugins
   before every build; compare lists only through `Collections::normaliseSets()`.
 - **A one-way synonym's `root` is the term that is *searched*:** `root: "nursing home", synonyms:
   ["care home"]` makes *nursing home* find *care home* and never the reverse (probed 30.0, 29 Oct 2026).
+- **30.0 honours a curation rule's `synonyms: true` but leaves it out of a read; 30.2 returns it, with
+  `stem: false`** (probed both, 30 Oct 2026). The test container is 30.0, so a test cannot read the
+  option back: assert on `desiredSet()` and on search, and compare only through
+  `Rules::countDiffering()`, which skips the key where the read lacks it.
 
 ### Tooling
 

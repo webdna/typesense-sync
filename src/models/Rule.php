@@ -55,6 +55,11 @@ class Rule extends Model
     public string $matchType = self::MATCH_EXACT;
 
     /**
+     * Also fire when the search is one of the term's synonyms (BR-23).
+     */
+    public bool $matchSynonyms = false;
+
+    /**
      * Element ids in the order they are pinned: position = index + 1.
      *
      * @var int[]
@@ -92,6 +97,7 @@ class Rule extends Model
         $record->sortOrder = $this->sortOrder;
         $record->query = $this->query;
         $record->matchType = $this->matchType;
+        $record->matchSynonyms = $this->matchSynonyms;
         $record->pins = $this->pins;
         $record->hides = $this->hides;
         $record->effectiveFrom = Db::prepareDateForDb($this->effectiveFrom);
@@ -119,6 +125,7 @@ class Rule extends Model
         return [
             'query' => Craft::t('typesense-sync', 'Search term'),
             'matchType' => Craft::t('typesense-sync', 'Match'),
+            'matchSynonyms' => Craft::t('typesense-sync', 'Also match synonyms'),
             'pins' => Craft::t('typesense-sync', 'Pin'),
             'hides' => Craft::t('typesense-sync', 'Hide'),
             'effectiveFrom' => Craft::t('typesense-sync', 'Starts'),

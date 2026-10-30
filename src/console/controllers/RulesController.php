@@ -214,6 +214,10 @@ class RulesController extends Controller
             }
         }
 
+        if ($result['warning'] !== null) {
+            $this->stderr($result['warning'] . "\n", Console::FG_YELLOW);
+        }
+
         if ($result['problem'] !== null) {
             $this->stderr(Craft::t('typesense-sync', 'Saved, not live yet: {reason}', ['reason' => $result['problem']]) . "\n", Console::FG_RED);
             $this->stderr(Craft::t('typesense-sync', '{name} is still linked to {collection}. Run this command again once Typesense answers; what was adopted is not adopted twice.', ['name' => $name, 'collection' => $handle]) . "\n", Console::FG_RED);

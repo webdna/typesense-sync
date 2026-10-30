@@ -57,6 +57,14 @@
       errors: rule.getErrors('matchType'),
     }) }}
 
+    {{ forms.lightswitchField({
+      label: 'Also match synonyms'|t('typesense-sync'),
+      instructions: 'The rule also applies when the search is a synonym of the term, from the Synonyms tab.'|t('typesense-sync'),
+      id: 'matchSynonyms',
+      name: 'matchSynonyms',
+      on: rule.matchSynonyms,
+    }) }}
+
     {% if pickers is empty %}
       <p class="warning with-icon">{{ 'Nothing feeds this collection, so there is nothing to pin or hide. Declare its sources in config/typesense-sync.php.'|t('typesense-sync') }}</p>
     {% endif %}

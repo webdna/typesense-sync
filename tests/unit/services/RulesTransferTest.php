@@ -35,6 +35,15 @@ class RulesTransferTest extends Unit
         $this->assertSame(self::GOOD, (new RulesTransfer())->read(Json::encode(self::GOOD)));
     }
 
+    public function testAlsoMatchSynonymsIsReadAndMayBeMissing(): void
+    {
+        // TN-19: the 1.1 key is optional within version 1 (BR-16).
+        $with = ['rules' => [['matchSynonyms' => true] + self::GOOD['rules'][0]]] + self::GOOD;
+
+        $this->assertSame($with, (new RulesTransfer())->read(Json::encode($with)));
+        $this->assertArrayNotHasKey('matchSynonyms', (new RulesTransfer())->read(Json::encode(self::GOOD))['rules'][0]);
+    }
+
     /**
      * @dataProvider badFiles
      */
@@ -65,6 +74,7 @@ class RulesTransferTest extends Unit
             'no effectiveTo key' => [Json::encode(['rules' => [$rule, array_diff_key($rule, ['effectiveTo' => 1])]] + self::GOOD), 'Rule 2'],
             'enabled a string' => [Json::encode(['synonyms' => [['root' => null, 'words' => ['a', 'b'], 'enabled' => 'yes']]] + self::GOOD), 'Synonym group 1'],
             'a word not a string' => [Json::encode(['synonyms' => [['root' => null, 'words' => ['a', 2], 'enabled' => true]]] + self::GOOD), 'Synonym group 1'],
+            'matchSynonyms a string' => [Json::encode(['rules' => [['matchSynonyms' => 'yes'] + $rule]] + self::GOOD), 'Rule 1 in the file is malformed'],
         ];
     }
 
@@ -111,6 +121,10 @@ class RulesTransferTest extends Unit
             'metadata' => [$rules, ['metadata' => ['k' => 'v']] + $simple, ['metadata']],
             'diversity' => [$rules, ['diversity' => ['similarity_metric' => 'x']] + $simple, ['diversity']],
             'tags' => [$rules, ['rule' => ['query' => 'garden', 'match' => 'exact', 'tags' => ['a']]] + $simple, ['rule.tags']],
+            'also match synonyms, as 30.2 returns it' => [$rules, ['rule' => ['query' => 'garden', 'match' => 'exact', 'stem' => false, 'synonyms' => true]] + $simple, []],
+            'synonyms off, as 30.2 returns it' => [$rules, ['rule' => ['query' => 'garden', 'match' => 'exact', 'stem' => false, 'synonyms' => false]] + $simple, []],
+            'stemming' => [$rules, ['rule' => ['query' => 'garden', 'match' => 'exact', 'stem' => true]] + $simple, ['rule.stem']],
+            'synonyms not a boolean' => [$rules, ['rule' => ['query' => 'garden', 'match' => 'exact', 'synonyms' => 'yes']] + $simple, ['rule.synonyms']],
             'triggered by a filter' => [$rules, ['rule' => ['filter_by' => 'a:1']] + $simple, ['rule.filter_by', 'no rule.query', 'rule.match']],
             'a pin position gap' => [$rules, ['includes' => [['id' => '1', 'position' => 3]]] + $simple, ['includes.position']],
             'no pins' => [$rules, ['includes' => []] + $simple, []],

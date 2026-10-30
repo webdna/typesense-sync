@@ -442,7 +442,9 @@ collection, with two tabs. The nav item appears only while the connection is con
 - **Rules.** "When someone searches *garden*, show these entries first, in this order, and never
   show that one." A rule has a search term, matched **Exact** or **Contains**, up to 20 pinned
   entries and up to 100 hidden ones, and optional **Starts** and **Ends** dates. Typesense calls a
-  rule a *curation*. When two rules match a search, only the one higher in the list applies, so drag
+  rule a *curation*. Switch on **Also match synonyms** and the rule also applies when the search is
+  one of its term's synonyms from the Synonyms tab, so a rule for *care home* also fires for
+  *nursing home*. When two rules match a search, only the one higher in the list applies, so drag
   rules to set which wins. A rule can be switched off and kept. A rule not yet started reads
   *Scheduled*, and one past its end reads *Ended*.
 - **Synonyms.** A group of words that count as the same. **All equal**: each word finds the others.
@@ -495,9 +497,13 @@ php craft typesense-sync/rules/adopt content --synonym-set=my_synonyms
 Adopt copies the set's items after the collection's existing rules or synonyms, pushes them, and then
 unlinks the original set from the collection. **It never deletes the original.** Items the section
 cannot show are listed and left out: a rule with a filter trigger, tags, a replaced query, a filter
-or sort, metadata or `stop_processing: false`, and a synonym item with a locale or symbols. So is a
-pinned or hidden id that is not an element feeding the collection, and a rule whose term the section
-would refuse. Running adopt again adds nothing new.
+or sort, metadata, stemming or `stop_processing: false`, and a synonym item with a locale or symbols.
+So is a pinned or hidden id that is not an element feeding the collection, and a rule whose term the
+section would refuse. Running adopt again adds nothing new.
+
+A rule that matches synonyms is adopted with **Also match synonyms** on. Typesense 30.0 applies that
+option but does not report it when a set is read, so on 30.0 adopt cannot tell which rules had it:
+every adopted rule comes in with it off, and adopt says so. Check those rules in the section.
 
 ### When a collection is removed from config
 

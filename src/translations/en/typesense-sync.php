@@ -437,4 +437,7 @@ return [
     'No rows are kept for “{collection}”. Orphaned: {orphans}.' => 'No rows are kept for “{collection}”. Orphaned: {orphans}.',
     'This deletes {rules, plural, =1{1 rule} other{# rules}} and {synonyms, plural, =1{1 synonym group} other{# synonym groups}} kept for {collection}.' => 'This deletes {rules, plural, =1{1 rule} other{# rules}} and {synonyms, plural, =1{1 synonym group} other{# synonym groups}} kept for {collection}.',
     'Deleted {rules, plural, =1{1 rule} other{# rules}} and {synonyms, plural, =1{1 synonym group} other{# synonym groups}} kept for {collection}.' => 'Deleted {rules, plural, =1{1 rule} other{# rules}} and {synonyms, plural, =1{1 synonym group} other{# synonym groups}} kept for {collection}.',
+    'Also match synonyms' => 'Also match synonyms',
+    'The rule also applies when the search is a synonym of the term, from the Synonyms tab.' => 'The rule also applies when the search is a synonym of the term, from the Synonyms tab.',
+    'This Typesense server does not report whether a rule also matches synonyms, so every adopted rule has Also match synonyms off. Check them in the control panel.' => 'This Typesense server does not report whether a rule also matches synonyms, so every adopted rule has Also match synonyms off. Check them in the control panel.',
 ];

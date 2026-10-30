@@ -1,7 +1,7 @@
 ---
 spec: Curations and synonyms in the CP
 slug: typesense-rules
-status: in-review
+status: building
 version: 1.1
 date: 2026-10-29
 author: Claude, with Sam Birch
@@ -13,7 +13,7 @@ related: [2026-09-30-typesense-sync.md]
 
 # Curations and synonyms in the CP
 
-> **Status:** in review (1.0 approved and built; 1.1 adds *Also match synonyms*) - **Version:** 1.1 - **Profile:** `_PROFILE.typesense-sync.md`
+> **Status:** building (1.0 built; 1.1, *Also match synonyms*, approved 30 Oct) - **Version:** 1.1 - **Profile:** `_PROFILE.typesense-sync.md`
 > Editors can decide what a search shows (pin, hide, schedule) and which words count as the same,
 > from the Craft control panel, without a developer opening the Typesense dashboard.
 
@@ -818,7 +818,7 @@ the need (30 Oct); it lands before the 1.1.0 tag, which also waits on St Monica 
       AC-3 label, AC-7 banner, AC-11, drag reorder and both empty states stand on 3.2's pass (no
       template or controller changed between it and this task bar the row links). B5 #1 green on 8.2
       + 8.4: 270 unit + 157 integration; #2 no output; #3 valid.
-- [ ] **5.2 Also match synonyms** - `src/migrations/m261030_000000_rule_synonyms.php` (new; adds the
+- [x] **5.2 Also match synonyms** - `src/migrations/m261030_000000_rule_synonyms.php` (new; adds the
       column if missing, `safeDown()` refuses like m261029), `src/migrations/Install.php` (fresh installs),
       `schemaVersion` → 1.1.1 so Craft offers the migration, `src/models/Rule.php`, `src/services/Rules.php`
       (`desiredSet()`, the comparison's 30.0 exception), `src/services/RulesTransfer.php` (export, `read()`,
@@ -826,6 +826,37 @@ the need (30 Oct); it lands before the 1.1.0 tag, which also waits on St Monica 
       `src/templates/rules/_edit.twig`, translations, README (*Rules and synonyms*, *Adopting a set made by
       hand*), CHANGELOG 1.1.0, and a profile trap: 30.0 leaves `rule.synonyms` out of a read
       Rules: BR-16, BR-17, BR-18, BR-23 · Verify: B5 #1, B5 #4, TS-12, TS-13, TN-17, TN-18, TN-19, regression row 6
+      *As built (30 Oct 2026):* column `matchSynonyms` (bool, default false) in `Install::createTables()`
+      and the new migration (adds it only if missing, so an upgrade from 1.0.x, which gets it from
+      Install via m261029, runs it as a no-op); `schemaVersion` 1.1.1. `Rule::$matchSynonyms`. The
+      item builder adds `rule.synonyms: true` only when on. **The 30.0 exception lives in
+      `Rules::countDiffering()`**: items are keyed raw first, and where the live item's `rule` lacks
+      a `synonyms` key the wanted one's is unset before both are normalised (a 30.2 `false` is
+      dropped by `normaliseItem()` as before). Export writes `matchSynonyms` on every rule; `isRule()`
+      accepts it missing, refuses a non-bool; import defaults it off. `advancedOptions()` lets
+      `rule.synonyms` through only when `=== true` (after normalising), so `stem: true` and a
+      non-bool `synonyms` still list; `adoptedRule()` sets the option from it. Adopt's result gains
+      `warning` (set when the set has rule items and none carries a `synonyms` key), printed in
+      yellow by the command. CP: `matchSynonyms` posted by a lightswitch under Match; no list column.
+      3 new strings. README (rule bullet, adopt paragraph), CHANGELOG 1.1.0 rule line, profile trap.
+      Tests: unit `RulesTest` +1 (30.0 read in step, 30.2 reads both ways, TN-17 both ways),
+      `RulesTransferTest` +6 (TN-19 read with and without the key, a non-bool refused; adopt filter:
+      30.2 on/off shapes simple, TN-18 `rule.stem`, a non-bool `rule.synonyms`); integration `RulesTest`
+      TS-12 (real search on 30.0: off the rule does not fire for "nursing home", on it does, the set
+      reads in step and two applies push nothing), `RulesConsoleTest` TS-13 (export/import carry it,
+      off not sent, in step; step 3 adopts through a `Stub` of the `rules` component whose `liveSet()`
+      adds 30.2's `stem: false, synonyms: true` to the real read — option on, no warning; step 4 on
+      the real 30.0 read — option off and the warning), `RulesControllerTest` +1 (the switch renders off,
+      a save posting it stores and pushes it, the edit screen reloads it on, posting it empty clears it),
+      `MigrationsTest` +1 (regression row 6: column dropped with a rule in the table, the migration
+      adds it off, a second run is a no-op, down refuses). **Mutation-checked:** never sending the key
+      fails TS-12 step 2; dropping the exception fails TS-12 step 3. B5 #1 green on 8.2 + 8.4: 277 unit
+      + 161 integration; #2 no output; #3 valid. **craft5 (regression row 6 for real):** `migrate/up
+      --plugin=typesense-sync` applied 1 migration; `content`'s sets still read in step, `collections/apply`
+      pushed nothing, export shows both existing rules `matchSynonyms: false`. **Owed: B5 #4's switch
+      in the browser (Sam signs in)** — the render and save are covered by `RulesControllerTest`.
+      Test infra: the suite's Typesense container had gone zombie (timeouts across unrelated tests);
+      it was recreated with `docker compose up -d typesense`.
 
 ---
 
@@ -834,7 +865,6 @@ the need (30 Oct); it lands before the 1.1.0 tag, which also waits on St Monica 
 | # | Question | Owner | State |
 |---|---|---|---|
 | 2 | Store listing and screenshots: add the Typesense section to the listing text and shots? | Sam | Open - blocking release |
-| 3 | Approve 1.1: BR-23 (off by default, the key not sent when off, the 30.0 comparison exception), adopt's 30.0 warning, TS-12/13, task 5.2 | Sam | Open - blocking build |
 | 4 | St Monica Trust runs on the plugin and is verified (Sam, 30 Oct: the release gate) | Sam | Open - blocking release |
 
 **Assumptions**
@@ -965,6 +995,7 @@ docker compose run --rm php composer validate --strict --no-plugins
 
 | Date | Version | Change | By |
 |---|---|---|---|
+| 2026-10-30 | 1.1 | Approved by Sam; Appendix A row 3 removed (its decisions are BR-23 and BR-18). Task 5.2 built | Sam Birch, Claude |
 | 2026-10-30 | 1.1 | *Also match synonyms* per rule (Sam, 30 Oct, for St Monica's hand-made rules): §1, §2, §3 journey 1, §4 column, BR-23 new, BR-16/17/18 amended, §6 rule edit, AC-13/14, TS-12/13, TN-17 to 19, regression row 6, task 5.2, A-3/A-4, B2/B3/B4/B5. 30.0 vs 30.2 behaviour probed for BR-23. Back to in review | Claude |
 | 2026-10-29 | 1.0.1 | Task 1.2: one-way synonyms corrected to Typesense's direction (the main term finds the words), probed on 30.0; §1 vocabulary and TS-4 step 4 | Claude |
 | 2026-10-29 | 1.0 | Approved by Sam. Appendix A row 1 (St Monica's server version) moved to St Monica's migration work - it does not block this build or release | Sam Birch |

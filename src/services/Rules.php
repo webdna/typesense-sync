@@ -709,6 +709,9 @@ class Rules extends Component
     /**
      * How many items differ between two item lists, matched by id: changed, missing or extra.
      *
+     * Typesense 30.0 honours a rule's `synonyms` but leaves it out of a read, so where the live
+     * item's rule has no such key, the wanted item's is not compared either (BR-23).
+     *
      * @param array<int, mixed> $wanted
      * @param array<int, mixed> $live
      */
@@ -718,7 +721,7 @@ class Rules extends Component
             $keyed = [];
             foreach ($items as $item) {
                 if (is_array($item)) {
-                    $keyed[(string)($item['id'] ?? '')] = self::normaliseItem($item);
+                    $keyed[(string)($item['id'] ?? '')] = $item;
                 }
             }
 
@@ -726,6 +729,17 @@ class Rules extends Component
         };
         $wanted = $byId($wanted);
         $live = $byId($live);
+
+        foreach ($wanted as $id => $item) {
+            $liveRule = $live[$id]['rule'] ?? null;
+
+            if (is_array($item['rule'] ?? null) && is_array($liveRule) && !array_key_exists('synonyms', $liveRule)) {
+                unset($wanted[$id]['rule']['synonyms']);
+            }
+        }
+
+        $wanted = array_map([self::class, 'normaliseItem'], $wanted);
+        $live = array_map([self::class, 'normaliseItem'], $live);
         $differs = 0;
 
         foreach (array_unique(array_merge(array_keys($wanted), array_keys($live))) as $id) {
@@ -863,6 +877,11 @@ class Rules extends Component
                 'id' => sprintf('rule-%04d', count($items) + 1),
                 'rule' => ['query' => $rule->query, 'match' => $rule->matchType],
             ];
+
+            // Sent only when on, so a rule saved before the option pushes what it did (BR-23).
+            if ($rule->matchSynonyms) {
+                $item['rule']['synonyms'] = true;
+            }
 
             if ($includes !== []) {
                 $item['includes'] = $includes;

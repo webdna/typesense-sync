@@ -59,4 +59,22 @@ class RulesTest extends Unit
         $this->assertSame(1, Rules::countDiffering([$sent], [['filter_curated_hits' => false] + $sent]));
         $this->assertSame(1, Rules::countDiffering([$sent], [['replace_query' => 'b'] + $sent]));
     }
+
+    public function testAlsoMatchSynonymsIsComparedOnlyWhereTheServerReportsIt(): void
+    {
+        $sent = ['id' => 'rule-0001', 'rule' => ['query' => 'care home', 'match' => 'exact', 'synonyms' => true], 'excludes' => [['id' => '1']], 'filter_curated_hits' => true, 'stop_processing' => true];
+        $off = ['rule' => ['query' => 'care home', 'match' => 'exact']] + $sent;
+        $read = fn(bool $synonyms) => ['rule' => ['match' => 'exact', 'query' => 'care home', 'stem' => false, 'synonyms' => $synonyms]] + $sent;
+
+        // 30.0 honours the option but leaves it out of a read (BR-23).
+        $this->assertSame(0, Rules::countDiffering([$sent], [$off]));
+
+        // 30.2 reports it, with stem.
+        $this->assertSame(0, Rules::countDiffering([$sent], [$read(true)]));
+        $this->assertSame(0, Rules::countDiffering([$off], [$read(false)]));
+
+        // TN-17: switched off in a 30.2 dashboard, or on where Craft has it off.
+        $this->assertSame(1, Rules::countDiffering([$sent], [$read(false)]));
+        $this->assertSame(1, Rules::countDiffering([$off], [$read(true)]));
+    }
 }

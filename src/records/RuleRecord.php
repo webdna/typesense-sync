@@ -15,6 +15,7 @@ use craft\db\ActiveRecord;
  * @property int $sortOrder
  * @property string $query
  * @property string $matchType
+ * @property bool $matchSynonyms
  * @property int[]|string $pins
  * @property int[]|string $hides
  * @property string|null $effectiveFrom
