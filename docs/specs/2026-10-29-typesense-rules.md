@@ -1,8 +1,8 @@
 ---
 spec: Curations and synonyms in the CP
 slug: typesense-rules
-status: approved
-version: 1.0.1
+status: in-review
+version: 1.1
 date: 2026-10-29
 author: Claude, with Sam Birch
 client: webdna (Plugin Store product); first site St Monica Trust
@@ -13,7 +13,7 @@ related: [2026-09-30-typesense-sync.md]
 
 # Curations and synonyms in the CP
 
-> **Status:** approved - **Version:** 1.0.1 - **Profile:** `_PROFILE.typesense-sync.md`
+> **Status:** in review (1.0 approved and built; 1.1 adds *Also match synonyms*) - **Version:** 1.1 - **Profile:** `_PROFILE.typesense-sync.md`
 > Editors can decide what a search shows (pin, hide, schedule) and which words count as the same,
 > from the Craft control panel, without a developer opening the Typesense dashboard.
 
@@ -26,7 +26,8 @@ declares. On it an editor writes **rules** ("when someone searches *garden*, sho
 page first and the Bath village second, and never show the old recruitment page") and **synonyms**
 ("*care home*, *nursing home* and *residential care* mean the same thing"). Saving makes the change
 live in search straight away. A rule can be given dates, so a seasonal promotion starts and stops on
-its own.
+its own, and can be told to **also match synonyms**, so a rule for *care home* also fires when
+someone searches *nursing home*, without writing the rule twice.
 
 The idea it rests on: **Craft holds the rules; Typesense holds a copy.** The plugin owns exactly one
 rule set and one synonym set per collection, creates them, attaches them to the collection, and
@@ -52,6 +53,7 @@ Craft — less code, but a collection rebuild or a new environment would lose ev
 | Rule | "When the search is *X*, pin these, hide those." Typesense calls it a *curation*. |
 | Pin | Put an entry at a fixed position at the top of a search's results. |
 | Hide | Keep an entry out of a search's results, however well it matches. |
+| Also match synonyms | A rule option: the rule also fires when the search is one of its term's synonyms. |
 | Synonym group | Words that count as the same. *All equal*: each finds the others. *One way*: the main term finds the words, not the reverse (Typesense's `root`). |
 | Out of step | What Typesense holds differs from what Craft holds — usually someone edited it in the dashboard. |
 | Adopt | Copy a set made by hand in Typesense into a collection's rules or synonyms, and stop using the original. |
@@ -64,8 +66,8 @@ Craft — less code, but a collection rebuild or a new environment would lose ev
 
 - The Typesense CP section: per collection, a Rules tab and a Synonyms tab — add, edit, reorder,
   switch off and delete.
-- A rule: the search term, whether it must match exactly or only be contained, pinned entries in
-  order, hidden entries, optional start and end, on/off.
+- A rule: the search term, whether it must match exactly or only be contained, whether it also
+  matches the term's synonyms, pinned entries in order, hidden entries, optional start and end, on/off.
 - A synonym group: all equal, or one way to a main term.
 - One permission, *Manage Typesense rules*.
 - Keeping the sets attached through every collection rebuild, and restoring them from Craft with the
@@ -78,7 +80,7 @@ Craft — less code, but a collection rebuild or a new environment would lose ev
 
 | Not doing | Why |
 |---|---|
-| Advanced rule options (replace the query, add a filter or sort, tags, "keep looking after this rule", custom metadata, rules triggered by a filter, result diversity) | Sam, 29 Oct: editors get the simple rule only. A developer who needs the rest still has the Typesense dashboard — on a set the plugin does not own. |
+| Advanced rule options (replace the query, add a filter or sort, tags, "keep looking after this rule", stemming the term, custom metadata, rules triggered by a filter, result diversity) | Sam, 29 Oct: editors get the simple rule only (Sam, 30 Oct: *also match synonyms* joins it, for St Monica's hand-made rules). A developer who needs the rest still has the Typesense dashboard — on a set the plugin does not own. |
 | Named or shared sets across collections | One per collection (§1). |
 | Language-specific synonyms and indexed symbols | Simple scope; no known site needs them. |
 | Notifications | Nothing is sent: a rule change is the editor's own act. |
@@ -107,6 +109,7 @@ Craft — less code, but a collection rebuild or a new environment would lose ev
    1. The editor opens **Typesense** in the CP nav and picks the collection (with one collection, it
       opens straight on it).
    2. On **Rules**, they choose **New rule**, type the search term and choose *Exact* or *Contains*.
+      If the term has synonyms the rule should cover too, they switch on **Also match synonyms**.
    3. Under **Pin**, they pick entries; the order they are listed is the order they appear.
    4. Under **Hide**, they pick entries that must never show for that search.
    5. Optionally, they set **Starts** and **Ends**.
@@ -152,6 +155,7 @@ and points at the utility. Someone without the permission does not see the secti
 | sortOrder | smallint | 1-based within the collection. Earlier wins. |
 | query | string(255) | Trimmed. |
 | matchType | enum `exact`, `contains` | |
+| matchSynonyms | bool | Default false; added in 1.1 by its own migration, existing rows off (BR-23). |
 | pins | json | Ordered list of element ids. Position = index + 1. |
 | hides | json | List of element ids. |
 | effectiveFrom, effectiveTo | datetime, null | UTC. |
@@ -215,13 +219,14 @@ tables and leaves the Typesense sets attached (BR-20).
 | BR-13 | One permission, `typesense-sync:manageRules`, label *Manage Typesense rules*. It shows the **Typesense** CP nav item and every rules/synonyms screen and action; admins always have it. Each controller action checks it; a request without it gets 403. |
 | BR-14 | Craft is the source of truth. The section and the utility show each collection's state (§4 States); a set changed in the Typesense dashboard is shown as out of step, naming how many items differ, and the next CP save or `collections/apply` overwrites it. Nothing ever writes Typesense's version back into Craft except adopt (BR-18). |
 | BR-15 | `collections/apply`, `setup` and the utility's apply push every collection's sets and links. `collections/status` and the utility report the state. A `--dry-run` reports without writing. |
-| BR-16 | Export writes one JSON document per collection: rules and synonyms in order, each pinned or hidden element as `{uid, type, site, section/group, slug}`. The format carries a `version: 1` key. |
+| BR-16 | Export writes one JSON document per collection: rules and synonyms in order, each pinned or hidden element as `{uid, type, site, section/group, slug}`, each rule's *Also match synonyms* as `matchSynonyms` (bool). The format carries a `version: 1` key; the 1.1 key does not change the version (no file predates it outside a sandbox), and import reads a missing `matchSynonyms` as off and refuses a non-boolean one (64). |
 | BR-17 | Import resolves each element by uid, then by type + site + section/group + slug; an element it cannot resolve is left out and listed. Import **replaces** the collection's rules and synonyms, so it needs `--confirm=<handle>` (or the typed handle) like the other destructive commands, then pushes (BR-4). Exit 0 with a list of anything left out; 64 on a bad file; 78 on bad config. |
-| BR-18 | Adopt copies a named Typesense set's items into the collection, appended after existing rows, then pushes and links the owned set, then unlinks the source set from that collection. It never deletes the source set. An item using anything outside the simple rule (§2) — a filter-triggered rule, tags, replace query, filter or sort, metadata, diversity, `stop_processing: false`, a synonym locale or symbols — is skipped and listed. An include or exclude whose id is not an element feeding the collection is dropped and listed. |
+| BR-18 | Adopt copies a named Typesense set's items into the collection, appended after existing rows, then pushes and links the owned set, then unlinks the source set from that collection. It never deletes the source set. An item using anything outside the simple rule (§2) — a filter-triggered rule, tags, replace query, filter or sort, metadata, diversity, `stop_processing: false`, stemming (`rule.stem: true`), a synonym locale or symbols — is skipped and listed. `rule.synonyms: true` is simple: it adopts as *Also match synonyms* on (BR-23). When the set holds rules and none of them carries a `rule.synonyms` key, the server does not report the option (30.0), so adopt prints one warning that every adopted rule comes in with it off and should be checked. An include or exclude whose id is not an element feeding the collection is dropped and listed. |
 | BR-19 | The Typesense nav item and section exist only while the connection is configured; otherwise the section shows the utility's unconfigured message. A collection page reads Typesense only for the state — the rules themselves always render from Craft, so an unreachable cluster never blocks editing. |
 | BR-20 | Uninstall drops both tables and leaves the Typesense sets attached and intact (BR-12 forbids deleting them while linked, and stripping links would change live search on uninstall). The README says how to remove them by hand. |
 | BR-21 | Rows for a collection no longer declared are kept and not shown in the section; the utility lists them as orphaned, and `typesense-sync/rules/prune <handle> --confirm=<handle>` deletes them. |
 | BR-22 | Every new user-facing string goes through `Craft::t('typesense-sync', …)` and into the translations file; log lines stay English, as in the 1.0 spec. |
+| BR-23 | A rule has **Also match synonyms**, off by default. On, the pushed item's `rule` carries `synonyms: true`, and the rule also fires when the search is a synonym of its term from any synonym set the collection links. Off, the key is **not sent** (Typesense's default is false), so a rule saved before 1.1 pushes exactly what it did and reads in step after the upgrade. Typesense 30.0 honours the option but leaves it out of a read; 30.2 returns it with `stem: false` (both probed 30 Oct 2026). So the comparison (BR-14) takes `rule.synonyms` out of Craft's item **when the read item's `rule` has no `synonyms` key**, and the option alone never reads as out of step on 30.0. On a server that reports it, a difference counts as one item differing. |
 
 **Non-functional**
 
@@ -258,7 +263,7 @@ utility actions.
 |---|---|---|
 | **Typesense** nav item + section | New | Craft's CP section; tabs Rules / Synonyms per collection; collection switcher when there are several. |
 | Rules list | New | Admin table, drag to reorder; columns: term, match, pins count, hides count, status (On / Off / Scheduled / Ended), dates. |
-| Rule edit | New | Term, Exact/Contains, Pin (element select, sortable, max 20), Hide (element select), Starts, Ends, Enabled. |
+| Rule edit | New | Term, Exact/Contains, Also match synonyms (lightswitch under Match, with one line of instructions naming the Synonyms tab), Pin (element select, sortable, max 20), Hide (element select), Starts, Ends, Enabled. The Rules list gains no column for it. |
 | Synonyms list + edit | New | Type (All equal / One way), main term (one way), words (editable table). |
 | State banner | New | Top of each collection page (§4 States), with *Push now*. |
 | Utility | Reuse | Adds a per-collection rules/synonyms state row, "also linked" sets and orphaned rows. |
@@ -288,6 +293,8 @@ utility and settings screen did.
 | AC-10 | A user without *Manage Typesense rules* sees no Typesense nav item and cannot reach the screens; a user with it can. | TS-9 |
 | AC-11 | With Typesense unreachable, an editor can still open, edit and save rules; the page says the change is not live yet, and it goes live once Typesense is back. | TS-10 |
 | AC-12 | A pinned entry that is not published (future post date or expired) is never shown to visitors. | TS-11 |
+| AC-13 | Given synonyms "care home / nursing home" and a rule for "care home" pinning A, when a visitor searches "nursing home", then A is first with *Also match synonyms* on, and the rule does not apply with it off. | TS-12 |
+| AC-14 | Given a hand-made rule that matches synonyms, when it is adopted, or exported and imported, then the CP shows *Also match synonyms* on and search behaves as before. | TS-13 |
 
 ### Test data and preconditions
 
@@ -415,6 +422,27 @@ utility and settings screen did.
 
 *Success criterion: E is never returned. Mutation-check: with `filter_curated_hits` false the test must fail.*
 
+**TS-12 - Also match synonyms** - *covers AC-13; BR-14, BR-23* - Type: integration (30.0 container) + CP browser for the switch
+
+| # | Step | Expected |
+|---|---|---|
+| 1 | All equal group "care home", "nursing home"; entry A titled with neither; rule "care home", Exact, pin A, option off | The item's `rule` has no `synonyms` key; search "care home" puts A first; search "nursing home" does not return A first |
+| 2 | Switch the option on and save | The item's `rule` carries `synonyms: true`; search "nursing home" puts A first |
+| 3 | Read the state; run `collections/apply` twice | In step throughout; neither apply pushes (30.0 leaves the key out of its read) |
+
+*Success criterion: A is forced first for "nursing home" only with the option on, and the set never reads out of step. Mutation-checks: never sending the key fails step 2; comparing without the 30.0 exception fails step 3.*
+
+**TS-13 - The option travels** - *covers AC-14; BR-16, BR-17, BR-18, BR-23* - Type: integration (console; step 3 mocked client)
+
+| # | Step | Expected |
+|---|---|---|
+| 1 | A rule with the option on and one with it off; `rules/export <h> --file` | Each rule carries `matchSynonyms`, true and false |
+| 2 | Delete the rows; `rules/import <file> --confirm=<h>` | Both rows back with the option as exported; the pushed set equals TS-12 step 2's shape |
+| 3 | Adopt a set read back as 30.2 returns it: a rule with `rule: {query, match: exact, stem: false, synonyms: true}` | One rule, option on, nothing listed as advanced, no warning |
+| 4 | On the 30.0 container, adopt a set PUT with `synonyms: true` | The rule is adopted with the option off, and the one warning line (BR-18) is printed |
+
+*Success criterion: the option survives export, import and a 30.2 adopt unchanged, and a 30.0 adopt says it cannot see it.*
+
 ### Negative and edge cases
 
 | # | Condition | Expected behaviour |
@@ -435,6 +463,9 @@ utility and settings screen did.
 | TN-14 | Connection unconfigured | Section shows the unconfigured message; no nav item (BR-19) |
 | TN-15 | Uninstall | Tables gone; sets still in Typesense and linked; search unaffected (BR-20) |
 | TN-16 | Query of 256 characters, or only spaces | Refused (BR-6) |
+| TN-17 | A 30.2-shaped read whose rule has `synonyms: false` where Craft's has it on | Out of step, 1 item differs; the next save puts it back (BR-23, BR-14) |
+| TN-18 | Adopt an item with `rule.stem: true` | Skipped and listed as `rule.stem` (BR-18) |
+| TN-19 | Import a file whose rule has no `matchSynonyms`, or `"matchSynonyms": "yes"` | The first imports with the option off; the second exits 64, nothing changed (BR-17) |
 
 ### Automated checks
 
@@ -446,7 +477,10 @@ utility and settings screen did.
   tests follow `UtilityTest` (controller namespace swap, Accept JSON, CSRF, Pro edition).
 - Existing guards extend automatically: `TranslationsTest` (every new string, BR-22), `ReadmeTest` (no new
   config keys; the README gains a Rules section). `SiteNamesTest` / B5 #2 still pass.
-- **Mutation checks required:** BR-9 (TS-11), BR-12 (TN-8), BR-2 (TS-5 step 2).
+- **Mutation checks required:** BR-9 (TS-11), BR-12 (TN-8), BR-2 (TS-5 step 2), BR-23 (TS-12 steps 2 and 3).
+- The suite's container stays on 30.0, the minimum, so TS-12 proves the 30.0 exception for real; the 30.2
+  read shape is proved through the mocked client (TS-13 step 3, TN-17), and for real on St Monica's
+  30.2 cluster in its own migration.
 - Manual: the CP browser pass in craft5 — TS-2 step 3, TS-6 step 2, TS-9, TS-10, drag reorder,
   the empty states. Craft's own components carry no automation hooks the suite needs; the browser
   pass is a checklist, not a script.
@@ -464,6 +498,7 @@ both the state check and the tests.
 | `setup` on a fresh install | Gains a step; must still exit 0 with nothing declared |
 | Scoped-key search (`SearchTest`) | Rules now apply to the same searches |
 | Settings save | Must not pick up any rules data into project config (`Settings::fields()`) |
+| Upgrading an install with rules (craft5) to 1.1 | The payload builder changes for every rule: after the new migration, every set must read in step and `collections/apply` push nothing |
 
 ---
 
@@ -475,10 +510,11 @@ both the state check and the tests.
 | 2 | Collections integration: links in every version, diff, apply, status, setup, utility | 1 |
 | 3 | CP section, permission, screens | 1 |
 | 4 | Console: export, import, adopt, prune | 1, 2 |
-| 5 | README, CHANGELOG 1.1.0, translations, craft5 browser pass | 2, 3, 4 |
+| 5 | README, CHANGELOG 1.1.0, translations, craft5 browser pass; then *Also match synonyms* (5.2) | 2, 3, 4 |
 
 Phase 2 goes before 3: it is where search can break for everyone (a rebuild losing links), so it is
-proven before any screen writes rules.
+proven before any screen writes rules. 5.2 came after 5.1 because St Monica's hand-made rules showed
+the need (30 Oct); it lands before the 1.1.0 tag, which also waits on St Monica running on the plugin.
 
 ### Tasks
 
@@ -782,6 +818,14 @@ proven before any screen writes rules.
       AC-3 label, AC-7 banner, AC-11, drag reorder and both empty states stand on 3.2's pass (no
       template or controller changed between it and this task bar the row links). B5 #1 green on 8.2
       + 8.4: 270 unit + 157 integration; #2 no output; #3 valid.
+- [ ] **5.2 Also match synonyms** - `src/migrations/m261030_000000_rule_synonyms.php` (new; adds the
+      column if missing, `safeDown()` refuses like m261029), `src/migrations/Install.php` (fresh installs),
+      `schemaVersion` → 1.1.1 so Craft offers the migration, `src/models/Rule.php`, `src/services/Rules.php`
+      (`desiredSet()`, the comparison's 30.0 exception), `src/services/RulesTransfer.php` (export, `read()`,
+      import, `advancedOptions()`, adopt's warning), `src/controllers/RulesController.php` (save),
+      `src/templates/rules/_edit.twig`, translations, README (*Rules and synonyms*, *Adopting a set made by
+      hand*), CHANGELOG 1.1.0, and a profile trap: 30.0 leaves `rule.synonyms` out of a read
+      Rules: BR-16, BR-17, BR-18, BR-23 · Verify: B5 #1, B5 #4, TS-12, TS-13, TN-17, TN-18, TN-19, regression row 6
 
 ---
 
@@ -790,6 +834,8 @@ proven before any screen writes rules.
 | # | Question | Owner | State |
 |---|---|---|---|
 | 2 | Store listing and screenshots: add the Typesense section to the listing text and shots? | Sam | Open - blocking release |
+| 3 | Approve 1.1: BR-23 (off by default, the key not sent when off, the 30.0 comparison exception), adopt's 30.0 warning, TS-12/13, task 5.2 | Sam | Open - blocking build |
+| 4 | St Monica Trust runs on the plugin and is verified (Sam, 30 Oct: the release gate) | Sam | Open - blocking release |
 
 **Assumptions**
 
@@ -803,6 +849,12 @@ proven before any screen writes rules.
 - Export matches entries by uid then section + slug (BR-16, BR-17), which covers a database copied
   down from production and content made separately with the same slugs.
 - 1.1.0 is a minor release in the existing paid edition — no new edition or price.
+- *Also match synonyms* is off for new rules, matching Typesense's default and every existing rule;
+  St Monica's rules arrive on through adopt (BR-23).
+- The minimum server stays 30.0. On 30.0 an edit to the option in the dashboard cannot be seen, and
+  adopt cannot read it (it warns); raising the minimum to 30.2 was not chosen, because it would
+  shut out 30.0 sites for one option (BR-23, BR-18).
+- The option is shown only on the edit screen, not as a Rules list column.
 
 ---
 
@@ -832,6 +884,8 @@ all three.
 8. `tests/integration/UtilityTest.php` (web-controller test pattern), `RecreateTest.php`,
    `tests/Support/TestCollections.php`.
 9. `vendor/typesense/typesense-php/src/CurationSets.php`, `CurationSet.php`, `SynonymSets.php`.
+10. For 5.2: the as-built notes of 1.1, 1.2, 4.1 and 4.2 above, then `Rules::desiredSet()`, `normaliseItem()`
+    and `countDiffering()`, `RulesTransfer::advancedOptions()` and `isRule()`; they hold the shapes 5.2 extends.
 
 ## B3. Guardrails
 
@@ -854,6 +908,11 @@ all three.
   server side only.
 - **Do not let a failed push roll back the editor's save** (BR-4) - an outage would lose their work.
 - **Do not name St Monica or any site in `src/`** - B5 #2 fails.
+- **Do not send `rule.synonyms: false`** - off means the key is absent; sending false changes the
+  payload of every rule saved before 1.1, which regression row 6 exists to catch (BR-23).
+- **Do not compare `rule.synonyms` against a read that lacks the key** - 30.0 drops it from reads, so
+  every rule with the option on would read out of step forever and every apply would push it again
+  (probed 30 Oct 2026).
 
 ## B4. Definition of done
 
@@ -863,6 +922,8 @@ all three.
 - [x] The regression checks in §7 pass
 - [x] B5 below runs clean on PHP 8.2 and 8.4
 - [x] The craft5 browser pass (B5 #4) is recorded in the task line (3.2 and 5.1)
+- [ ] 1.1: AC-13 and AC-14 pass; TS-12, TS-13, TN-17 to TN-19 and regression row 6 automated; BR-23
+      mutation-checked; B5 #1 clean on 8.2 and 8.4; the switch in B5 #4 recorded in 5.2's line
 
 ## B5. Verification
 
@@ -882,11 +943,14 @@ docker compose run --rm php composer validate --strict --no-plugins
 
 # 4. CP browser pass in craft5 (manual) - AC-3 label, AC-7 banner, AC-10, AC-11, drag reorder,
 #    both empty states. Record pass/fail per item in task 5.1.
+#    5.2: Also match synonyms switches on, saves, reloads on; a search for a synonym in craft5's
+#    front end pins the entry (AC-13). Record in task 5.2.
 ```
 
 | AC | Verified by |
 |---|---|
-| AC-1, 2, 4, 5, 6, 8, 9, 12 | B5 #1 |
+| AC-1, 2, 4, 5, 6, 8, 9, 12, 14 | B5 #1 |
+| AC-13 | B5 #1 and #4 |
 | AC-3, 7, 10, 11 | B5 #1 and #4 |
 
 ## B6. Out of bounds
@@ -901,6 +965,7 @@ docker compose run --rm php composer validate --strict --no-plugins
 
 | Date | Version | Change | By |
 |---|---|---|---|
+| 2026-10-30 | 1.1 | *Also match synonyms* per rule (Sam, 30 Oct, for St Monica's hand-made rules): §1, §2, §3 journey 1, §4 column, BR-23 new, BR-16/17/18 amended, §6 rule edit, AC-13/14, TS-12/13, TN-17 to 19, regression row 6, task 5.2, A-3/A-4, B2/B3/B4/B5. 30.0 vs 30.2 behaviour probed for BR-23. Back to in review | Claude |
 | 2026-10-29 | 1.0.1 | Task 1.2: one-way synonyms corrected to Typesense's direction (the main term finds the words), probed on 30.0; §1 vocabulary and TS-4 step 4 | Claude |
 | 2026-10-29 | 1.0 | Approved by Sam. Appendix A row 1 (St Monica's server version) moved to St Monica's migration work - it does not block this build or release | Sam Birch |
 | 2026-10-29 | 0.1 | First draft; supersedes the 1.0 spec's out-of-scope row "Synonyms and curation rules" | Claude, with Sam Birch |
