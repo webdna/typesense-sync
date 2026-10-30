@@ -282,7 +282,7 @@ class RulesConsoleTest extends Unit
         // Step 2.
         $run = $this->command('rules/adopt', ['content', 'curationSet' => $old]);
         $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
-        $this->assertStringContainsString("Adopted 1 rules from $old into content.", $run['out']);
+        $this->assertStringContainsString("Adopted 1 rule from $old into content.", $run['out']);
         $this->assertStringContainsString('Item b-replace uses more than a simple rule (replace_query) and was skipped.', $run['err']);
         $this->assertStringContainsString('Rule “garden”: document 999999 is not an entry feeding this collection and was dropped.', $run['err']);
         $this->assertStringContainsString('Rule “garden”: document not-an-element is not an entry', $run['err']);
@@ -408,7 +408,7 @@ class RulesConsoleTest extends Unit
 
         $run = $this->command('rules/prune', ['gone'], ['gone']);
         $this->assertSame(ExitCode::OK, $run['exit'], $run['err']);
-        $this->assertStringContainsString('Deleted 1 rules and 1 synonym groups kept for gone.', $run['out']);
+        $this->assertStringContainsString('Deleted 1 rule and 1 synonym group kept for gone.', $run['out']);
         $this->assertSame([], $this->plugin->rules->orphans());
         $this->assertCount(1, $this->plugin->rules->getRules('content'), 'a declared collection keeps its rows');
         $this->assertCount(1, $this->plugin->rules->getSynonymGroups('content'));

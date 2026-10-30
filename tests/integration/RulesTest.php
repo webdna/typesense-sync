@@ -20,6 +20,7 @@ use Typesense\Client as TypesenseClient;
 use Typesense\Exceptions\ObjectNotFound;
 use webdna\typesensesync\errors\SyncException;
 use webdna\typesensesync\jobs\PushRules;
+use webdna\typesensesync\migrations\Install;
 use webdna\typesensesync\models\Rule;
 use webdna\typesensesync\models\Settings;
 use webdna\typesensesync\models\SynonymGroup;
@@ -36,7 +37,7 @@ use yii\log\Logger;
 /**
  * The rules service against the real server: the sets it pushes, what search then does with them,
  * the state it reports, a set deleted without breaking search, and links that survive a rebuild
- * (TS-1, TS-3, TS-4, TS-5, TS-11, TN-5, TN-8, TN-9; BR-1, 2, 3, 4, 5, 8, 9, 11, 12, 14).
+ * (TS-1, TS-3, TS-4, TS-5, TS-11, TN-5, TN-8, TN-9, TN-15; BR-1, 2, 3, 4, 5, 8, 9, 11, 12, 14, 20).
  */
 class RulesTest extends Unit
 {
@@ -355,6 +356,38 @@ class RulesTest extends Unit
         $this->assertNull($this->rules()->liveSet(Rules::KIND_SYNONYMS, $name));
         $this->assertSame([], $this->admin->collections[$this->prefix . 'content_1']->retrieve()['synonym_sets']);
         $this->assertSame([], $this->rules()->deleteSet(Rules::KIND_SYNONYMS, $name), 'a set already gone is not an error');
+    }
+
+    public function testUninstallDropsTheTablesAndLeavesTheSetsLinked(): void
+    {
+        // TN-15 (BR-20): the tables go; Typesense keeps both sets, linked, and search is unchanged.
+        $a = $this->indexedEntry('Garden A');
+        $b = $this->indexedEntry('Garden B');
+        $d = $this->indexedEntry('Nursing home');
+        $this->saveRule('garden', Rule::MATCH_EXACT, pins: [$b->id, $a->id]);
+        $this->assertTrue($this->rules()->saveSynonymGroup(new SynonymGroup(['collection' => 'content', 'words' => ['care home', 'nursing home']])));
+        $this->assertNull($this->rules()->pushOrQueue('content'));
+        $rules = $this->liveItems(Rules::KIND_RULES);
+        $synonyms = $this->liveItems(Rules::KIND_SYNONYMS);
+
+        $db = Craft::$app->getDb();
+        try {
+            $this->assertTrue((new Install())->safeDown());
+            $db->getSchema()->refresh();
+            $this->assertFalse($db->tableExists(RuleRecord::TABLE));
+            $this->assertFalse($db->tableExists(SynonymRecord::TABLE));
+
+            $this->assertSame($rules, $this->liveItems(Rules::KIND_RULES));
+            $this->assertSame($synonyms, $this->liveItems(Rules::KIND_SYNONYMS));
+            $live = $this->admin->collections[$this->prefix . 'content_1']->retrieve();
+            $this->assertSame([$this->prefix . 'content_rules'], $live['curation_sets']);
+            $this->assertSame([$this->prefix . 'content_synonyms'], $live['synonym_sets']);
+            $this->assertSame([(string)$b->id, (string)$a->id], $this->search('garden'));
+            $this->assertSame([(string)$d->id], $this->search('care home'));
+        } finally {
+            (new Install())->createTables();
+            $db->getSchema()->refresh();
+        }
     }
 
     public function testRulesSynonymsAndAForeignLinkSurviveARebuild(): void

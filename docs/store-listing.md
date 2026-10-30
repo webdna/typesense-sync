@@ -2,7 +2,9 @@
 
 **Status:** drafted by Claude, 30 Sep 2026. Sam set the price and approved the text and the icon on
 19 Oct 2026 (spec Appendix A, #1, #3 and #4); the screenshots are still Sam's. Nothing here is
-published until Sam submits it.
+published until Sam submits it. **1.1.0 (30 Oct 2026):** the *Rules and synonyms* paragraph, the
+keywords and screenshots 6–7 are new, drafted by Claude and not yet reviewed (rules spec Appendix A
+#2).
 
 ## Fields
 
@@ -13,7 +15,7 @@ published until Sam submits it.
 | Package | `webdna/typesense-sync` |
 | Short description | Keep your content in a Typesense search index, with safe, filtered search keys for your pages. |
 | Categories | Search · Developer Tools |
-| Keywords | typesense, search, index, instant search, search keys, analytics |
+| Keywords | typesense, search, index, instant search, search keys, analytics, curation, synonyms, pinned results |
 | Edition | One edition: **$99**, renewal **$29** a year (Sam, 19 Oct 2026) |
 | Licence | Craft License |
 | Requires | Craft CMS 5.6+, PHP 8.2+, Typesense 30.0+ |
@@ -48,6 +50,15 @@ together, in the right order, so joins keep working.
 a key that can only search, expires within the hour, never returns pending or expired entries,
 and never returns the fields you mark private. The admin key never reaches a template.
 
+### Rules and synonyms your editors can manage
+
+A **Typesense** section in the control panel lets editors decide what a search shows: pin entries
+to the top for a search term, in their chosen order, hide others, and give a rule start and end
+dates so a promotion runs on its own. Synonym groups make *care home* find *nursing home*. Every
+change is live on save. Craft keeps the record, so rules survive every rebuild, move from staging
+to production by export and import, and a change made in the Typesense dashboard is shown as out of
+step and put back. A set someone already made by hand can be adopted in one command.
+
 ### Built in, off until you need it
 
 - Users, categories and Craft Commerce products as sources
@@ -72,6 +83,8 @@ Requires Typesense 30.0 or later, self-hosted or Typesense Cloud.
 3. Plugin settings with environment variables and a successful *Test connection*.
 4. The analytics pane, with its rules up to date.
 5. A search page built from `examples/alpine/search.twig`.
+6. The Typesense section's Rules tab: several rules, one Scheduled, drag handles showing.
+7. A rule's edit screen with two pinned entries and one hidden.
 
 ## Before submitting
 
@@ -81,3 +94,5 @@ Requires Typesense 30.0 or later, self-hosted or Typesense Cloud.
 - [ ] Screenshots taken (Appendix A #3)
 - [x] Icon approved (Appendix A #4)
 - [ ] `1.0.0` tagged with a matching `CHANGELOG.md` heading
+- [ ] 1.1.0: the rules paragraph, keywords and screenshots 6–7 reviewed (rules spec Appendix A #2)
+- [ ] `1.1.0` tagged with a matching `CHANGELOG.md` heading

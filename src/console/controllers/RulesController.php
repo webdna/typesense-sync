@@ -81,7 +81,7 @@ class RulesController extends Controller
             return ExitCode::UNSPECIFIED_ERROR;
         }
 
-        $this->stdout(Craft::t('typesense-sync', 'Exported {rules} rules and {synonyms} synonym groups from {collection} to {file}.', [
+        $this->stdout(Craft::t('typesense-sync', 'Exported {rules, plural, =1{1 rule} other{# rules}} and {synonyms, plural, =1{1 synonym group} other{# synonym groups}} from {collection} to {file}.', [
             'rules' => count($export['data']['rules']),
             'synonyms' => count($export['data']['synonyms']),
             'collection' => $handle,
@@ -137,7 +137,7 @@ class RulesController extends Controller
             return ExitCode::USAGE;
         }
 
-        $this->stdout(Craft::t('typesense-sync', 'Imported {rules} rules and {synonyms} synonym groups into {collection}.', [
+        $this->stdout(Craft::t('typesense-sync', 'Imported {rules, plural, =1{1 rule} other{# rules}} and {synonyms, plural, =1{1 synonym group} other{# synonym groups}} into {collection}.', [
             'rules' => $result['rules'],
             'synonyms' => $result['synonyms'],
             'collection' => $handle,
@@ -203,8 +203,8 @@ class RulesController extends Controller
         }
 
         $this->stdout(($kind === Rules::KIND_RULES
-            ? Craft::t('typesense-sync', 'Adopted {count} rules from {name} into {collection}.', ['count' => $result['rules'], 'name' => $name, 'collection' => $handle])
-            : Craft::t('typesense-sync', 'Adopted {count} synonym groups from {name} into {collection}.', ['count' => $result['synonyms'], 'name' => $name, 'collection' => $handle])) . "\n", Console::FG_GREEN);
+            ? Craft::t('typesense-sync', 'Adopted {count, plural, =1{1 rule} other{# rules}} from {name} into {collection}.', ['count' => $result['rules'], 'name' => $name, 'collection' => $handle])
+            : Craft::t('typesense-sync', 'Adopted {count, plural, =1{1 synonym group} other{# synonym groups}} from {name} into {collection}.', ['count' => $result['synonyms'], 'name' => $name, 'collection' => $handle])) . "\n", Console::FG_GREEN);
 
         if ($result['skipped'] !== []) {
             $this->stderr(Craft::t('typesense-sync', 'Not adopted:') . "\n", Console::FG_YELLOW);
@@ -252,7 +252,7 @@ class RulesController extends Controller
             return ExitCode::USAGE;
         }
 
-        if (!$this->confirmByHandle($handle, Craft::t('typesense-sync', 'This deletes {rules} rules and {synonyms} synonym groups kept for {collection}.', [
+        if (!$this->confirmByHandle($handle, Craft::t('typesense-sync', 'This deletes {rules, plural, =1{1 rule} other{# rules}} and {synonyms, plural, =1{1 synonym group} other{# synonym groups}} kept for {collection}.', [
             'rules' => $orphans[$handle][Rules::KIND_RULES],
             'synonyms' => $orphans[$handle][Rules::KIND_SYNONYMS],
             'collection' => $handle,
@@ -261,7 +261,7 @@ class RulesController extends Controller
         }
 
         $deleted = $rules->prune($handle);
-        $this->stdout(Craft::t('typesense-sync', 'Deleted {rules} rules and {synonyms} synonym groups kept for {collection}.', [
+        $this->stdout(Craft::t('typesense-sync', 'Deleted {rules, plural, =1{1 rule} other{# rules}} and {synonyms, plural, =1{1 synonym group} other{# synonym groups}} kept for {collection}.', [
             'rules' => $deleted[Rules::KIND_RULES],
             'synonyms' => $deleted[Rules::KIND_SYNONYMS],
             'collection' => $handle,

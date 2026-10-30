@@ -750,9 +750,38 @@ proven before any screen writes rules.
       its rows). **Mutation-checked:** no unlink fails TS-8 and the synonym test; no filter fails
       both; no formatter check fails the overridden-id test. B5 #1 green on 8.2 + 8.4: 270 unit +
       155 integration; #2 no output; #3 valid.
-- [ ] **5.1 Release** - `README.md` (Rules section, uninstall note), `CHANGELOG.md` 1.1.0,
+- [x] **5.1 Release** - `README.md` (Rules section, uninstall note), `CHANGELOG.md` 1.1.0,
       `src/translations/en/typesense-sync.php`, `docs/store-listing.md`, craft5 browser pass
       Rules: BR-20, BR-22 · Verify: B5 #1-#4, TN-15
+      *As built (30 Oct 2026):* README gains *Rules and synonyms* (the section and permission, rules,
+      synonyms, Craft-holds-the-record, states, foreign links, export/import, adopt, prune — prune
+      leaves the sets, as uninstall does), plus the intro bullet, Control panel, Console commands,
+      Services (`rules`, `rulesTransfer`), the environments note, and Uninstalling (tables dropped,
+      sets left linked; removing them by hand = PATCH the lists empty, then DELETE each set).
+      CHANGELOG `## 1.1.0 - 2026-10-30`; **tag `1.1.0` is Sam's**, and the date must move if it tags
+      later. Store listing: a rules paragraph, keywords, screenshots 6-7 and two checklist lines,
+      marked unreviewed — **Appendix A #2 stays open, Sam's.** TN-15's Typesense half was untested
+      (MigrationsTest covered the tables only): `RulesTest::testUninstallDropsTheTablesAndLeavesTheSetsLinked`
+      runs `Install::safeDown()` after a push and asserts both sets keep their items, the live version
+      still links them, and the pinned and synonym searches are unchanged. Six export/import/adopt/prune
+      count messages now use ICU plurals ("Adopted 1 rule", found on craft5). **Found in the browser
+      pass and fixed:** every Rules/Synonyms row link appended `/<id>` after `cpUrl()`, which on a
+      multi-site install ends `?site=<handle>`, so a title went back to the list
+      (`…/rules?site=default/3`) — craft5 gained a second site after 3.2's pass. `RulesController::tabUrl()`
+      takes an optional id and builds the whole path first; `RulesControllerTest::testARowLinksToItsEditScreenWhenCpUrlsCarryAQueryString`
+      saves a second site and fails on the old code (mutation-checked). 4.x on a real install
+      (craft5): `rules/export content` printed both rows; a hand-made `handmade_featured` (one simple
+      item, one `replace_query` item) linked to `harbour_content_1` showed as "also linked"; `rules/adopt`
+      took the simple item, listed the other, unlinked the source and kept it (200), search pinned 864
+      first, and a re-run adopted nothing. **B5 #4 browser pass, craft5, 30 Oct (Sam signed in) —
+      all PASS:** as admin, the adopted rule opens with its pin and hide, both tables' links open their
+      edit screens, the utility shows content's sets in step and no "also linked" after adopt; AC-10
+      without the permission as `hannah` (CP access, no grant): no Typesense nav item, the four screens
+      403, a CSRF-valid CP POST to `rules/push` 403; AC-10 with it as `curator` (granted on the user
+      for this pass): nav item shown, the screens 200, Push now 200 "…are live", the index draws.
+      AC-3 label, AC-7 banner, AC-11, drag reorder and both empty states stand on 3.2's pass (no
+      template or controller changed between it and this task bar the row links). B5 #1 green on 8.2
+      + 8.4: 270 unit + 157 integration; #2 no output; #3 valid.
 
 ---
 
@@ -828,12 +857,12 @@ all three.
 
 ## B4. Definition of done
 
-- [ ] Every AC in §7 passes; TS-1 to TS-11 and TN-1 to TN-16 automated where §7 says so
-- [ ] Every BR in §5 is enforced, and BR-2, BR-9 and BR-12 are mutation-checked
-- [ ] The test hooks in §7 exist (`desiredSet()`, set-aware `TestCollections::deleteAll()`)
-- [ ] The regression checks in §7 pass
-- [ ] B5 below runs clean on PHP 8.2 and 8.4
-- [ ] The craft5 browser pass (B5 #4) is recorded in the task line
+- [x] Every AC in §7 passes; TS-1 to TS-11 and TN-1 to TN-16 automated where §7 says so
+- [x] Every BR in §5 is enforced, and BR-2, BR-9 and BR-12 are mutation-checked
+- [x] The test hooks in §7 exist (`desiredSet()`, set-aware `TestCollections::deleteAll()`)
+- [x] The regression checks in §7 pass
+- [x] B5 below runs clean on PHP 8.2 and 8.4
+- [x] The craft5 browser pass (B5 #4) is recorded in the task line (3.2 and 5.1)
 
 ## B5. Verification
 

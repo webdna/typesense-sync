@@ -44,7 +44,7 @@ class SynonymsController extends SectionController
             'tableData' => array_map(fn(SynonymGroup $group) => [
                 'id' => $group->id,
                 'title' => $group->isOneWay() ? (string)$group->root : implode(', ', $group->words),
-                'url' => RulesController::tabUrl($group->collection, Rules::KIND_SYNONYMS) . '/' . $group->id,
+                'url' => RulesController::tabUrl($group->collection, Rules::KIND_SYNONYMS, $group->id),
                 'type' => $group->isOneWay() ? Craft::t('typesense-sync', 'One way') : Craft::t('typesense-sync', 'All equal'),
                 'words' => $group->isOneWay() ? implode(', ', $group->words) : '',
                 'statusKey' => $group->enabled ? 'on' : 'off',

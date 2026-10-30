@@ -1,5 +1,20 @@
 # Release Notes for Typesense Sync
 
+## 1.1.0 - 2026-10-30
+
+### Added
+- A **Typesense** section in the control panel, with a page per declared collection, where editors manage rules and synonyms. It needs the new *Manage Typesense rules* permission and appears only while the connection is configured.
+- Rules: for a search term, matched exactly or contained, pin up to 20 entries in order and hide up to 100, with optional start and end dates. Drag to set which rule wins, and switch a rule off without deleting it. Pinned entries still obey the search key's publication window and filters.
+- Synonym groups: all equal, or one way from a main term.
+- Craft holds the rules and Typesense holds a copy. The plugin owns one curation set and one synonym set per collection, pushes them on every save, links them to every collection version it builds, and keeps any set someone linked by hand. An edit saved while Typesense is unreachable is kept and pushed again from the queue.
+- Each collection shows whether Typesense matches Craft (not live yet, or out of step after a dashboard edit), in the section, the utility and `collections/status`. `collections/apply` and `setup` put Craft's version back.
+- `rules/export` and `rules/import` move a collection's rules and synonyms between environments, matching entries by uid, then by section and slug, and listing anything they cannot find.
+- `rules/adopt` brings a curation or synonym set made by hand in Typesense under the plugin, listing any item that uses an option the section does not offer, and unlinks the original without deleting it.
+- The utility lists rows left by a collection no longer declared, and `rules/prune` deletes them.
+
+### Changed
+- Uninstalling drops the plugin's rules and synonyms tables. The sets stay in Typesense, linked, so search is unchanged; the README says how to remove them.
+
 ## 1.0.1 - 2026-10-23
 
 ### Changed

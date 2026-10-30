@@ -170,11 +170,14 @@ class RulesController extends SectionController
     }
 
     /**
-     * A tab's CP URL.
+     * A tab's CP URL, or with an id, the edit screen of one of its rows.
+     *
+     * The path is built whole before cpUrl(), which adds a query string (`?site=` on a multi-site
+     * install), so nothing may be appended to what it returns.
      */
-    public static function tabUrl(string $collection, string $kind): string
+    public static function tabUrl(string $collection, string $kind, ?int $id = null): string
     {
-        return UrlHelper::cpUrl(sprintf('%s/%s/%s', TypesenseSync::SECTION_URI, $collection, $kind));
+        return UrlHelper::cpUrl(sprintf('%s/%s/%s', TypesenseSync::SECTION_URI, $collection, $kind) . ($id !== null ? '/' . $id : ''));
     }
 
     /**
@@ -207,7 +210,7 @@ class RulesController extends SectionController
         return [
             'id' => $rule->id,
             'title' => $rule->query,
-            'url' => self::tabUrl($rule->collection, Rules::KIND_RULES) . '/' . $rule->id,
+            'url' => self::tabUrl($rule->collection, Rules::KIND_RULES, $rule->id),
             'match' => $rule->matchType === Rule::MATCH_CONTAINS ? Craft::t('typesense-sync', 'Contains') : Craft::t('typesense-sync', 'Exact'),
             'pins' => count($rule->pins),
             'hides' => count($rule->hides),

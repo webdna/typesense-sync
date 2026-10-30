@@ -14,6 +14,9 @@ safe, filtered search key, by declaring what to index instead of writing a modul
 - **Built in, off until you declare it:** users, categories, Craft Commerce products, search
   analytics (popular searches, searches with no results, view counters that survive reindexing),
   and collections that join to one another.
+- **Rules and synonyms editors can manage.** A **Typesense** section in the control panel lets
+  editors pin and hide entries for a search, schedule those rules, and say which words mean the
+  same thing. Craft keeps the record, so rules survive a rebuild and move between environments.
 
 The plugin owns the machinery: queueing, batching, safe rebuilds and keys. Your site owns the
 meaning: which content goes where, and what a result looks like.
@@ -29,6 +32,7 @@ meaning: which content goes where, and what a result looks like.
 - [Search pages](#search-pages)
 - [Joined collections](#joined-collections)
 - [Analytics](#analytics)
+- [Rules and synonyms](#rules-and-synonyms)
 - [Control panel](#control-panel)
 - [Console commands](#console-commands)
 - [Extension points](#extension-points)
@@ -429,6 +433,85 @@ never one made by hand or by another environment. It keeps the collected counts.
 `craft.typesense.analyticsConfig()` gives a page the events key and rule names, and
 `examples/alpine/view-counter.js` posts one view per page load.
 
+## Rules and synonyms
+
+Editors with the **Manage Typesense rules** permission (`typesense-sync:manageRules`; admins always
+have it) get a **Typesense** item in the control panel nav. It has a page for each declared
+collection, with two tabs. The nav item appears only while the connection is configured.
+
+- **Rules.** "When someone searches *garden*, show these entries first, in this order, and never
+  show that one." A rule has a search term, matched **Exact** or **Contains**, up to 20 pinned
+  entries and up to 100 hidden ones, and optional **Starts** and **Ends** dates. Typesense calls a
+  rule a *curation*. When two rules match a search, only the one higher in the list applies, so drag
+  rules to set which wins. A rule can be switched off and kept. A rule not yet started reads
+  *Scheduled*, and one past its end reads *Ended*.
+- **Synonyms.** A group of words that count as the same. **All equal**: each word finds the others.
+  **One way**: the main term finds the words, and the words do not find it.
+
+The pickers offer only the sources that feed the collection, and a save naming any other element is
+refused. Each pinned or hidden element becomes a document id through the collection's formatter
+(`documentId()`) when it is pushed, so an overridden id is respected. An element deleted after it was
+picked is skipped and logged. Pinned entries obey the search's filters: a pinned entry outside a
+scoped key's publication window, or hidden by its filter, is never shown.
+
+**Craft holds the rules, and Typesense holds a copy.** For each collection the plugin owns one
+curation set, `<live alias>_rules`, and one synonym set, `<live alias>_synonyms`. It creates both,
+links them to the collection, and links them again to every version a recreate builds. Every save,
+reorder, switch or delete in the section pushes the whole set straight away. If Typesense cannot be
+reached, the edit is still saved, the page says *Saved, not live yet*, and a queue job pushes it again.
+
+Each collection page shows its state: nothing when Typesense matches Craft; *not live yet*, with a
+**Push now** button, when a set or its link is missing; *out of step* when someone changed the set in
+the Typesense dashboard. The next save, or `collections/apply`, puts Craft's version back. Nothing
+writes Typesense's version into Craft except `rules/adopt`. `collections/apply`, `collections/status`,
+`setup` and the utility all push or report the sets alongside the schema, so a wiped or new cluster
+gets its rules back from one command.
+
+A set someone linked to the collection by hand stays linked. The plugin carries it through every
+rebuild and never removes it, and the utility lists it as *also linked*. Advanced rule options
+(replacing the query, adding a filter or sort, tags, metadata) are not in the section. Use a set of
+your own in the Typesense dashboard for those.
+
+### Moving rules between environments
+
+```bash
+php craft typesense-sync/rules/export content --file=content-rules.json   # on staging
+php craft typesense-sync/rules/import content-rules.json                   # on production
+```
+
+The export names each pinned or hidden entry by its uid, and by its type, site, section or group and
+slug. Users travel by username. Import finds each one by uid first, then by the rest. It **replaces**
+the collection's rules and synonyms, so it asks you to type the collection's handle (or take
+`--confirm=<handle>`), then pushes. Anything it cannot find is listed and left out. A malformed file,
+or one of an unknown `version`, changes nothing.
+
+### Adopting a set made by hand
+
+```bash
+php craft typesense-sync/rules/adopt content --curation-set=my_featured
+php craft typesense-sync/rules/adopt content --synonym-set=my_synonyms
+```
+
+Adopt copies the set's items after the collection's existing rules or synonyms, pushes them, and then
+unlinks the original set from the collection. **It never deletes the original.** Items the section
+cannot show are listed and left out: a rule with a filter trigger, tags, a replaced query, a filter
+or sort, metadata or `stop_processing: false`, and a synonym item with a locale or symbols. So is a
+pinned or hidden id that is not an element feeding the collection, and a rule whose term the section
+would refuse. Running adopt again adds nothing new.
+
+### When a collection is removed from config
+
+Its rows are kept. The section stops showing them, and the utility lists them as orphaned. Delete
+them with:
+
+```bash
+php craft typesense-sync/rules/prune content --confirm=content
+```
+
+Prune deletes the rows in Craft only. Without the collection's config the plugin cannot name its
+sets, so they stay in Typesense, as they do on uninstall. Remove them by hand, as in
+[Uninstalling](#uninstalling).
+
 ## Control panel
 
 **Utilities → Typesense Sync** shows the connection, any configuration problems and warnings. For
@@ -436,7 +519,10 @@ each collection it shows the alias and live version, the document count and how 
 from the formatters, with **Apply**, **Reindex** (optionally pruning documents no element builds)
 and **Recreate** buttons. Recreate asks you to type the collection's handle to confirm. Reindex and
 recreate run as queue jobs. When analytics is declared, the utility also shows each rule's state on
-the server; apply rules with `analytics/apply`.
+the server; apply rules with `analytics/apply`. Each collection also shows the state of its rule
+and synonym sets, any set linked by hand, and rows left by collections no longer declared.
+
+The **Typesense** section is described in [Rules and synonyms](#rules-and-synonyms).
 
 **Sync to Typesense** is an element index action and an edit-screen action menu item for declared
 entries, categories, users and products.
@@ -456,8 +542,14 @@ Sync** permission (`utility:typesense-sync`).
 | `typesense-sync/collections/apply [--collection=h] [--dry-run]` | Create or alter in place |
 | `typesense-sync/collections/recreate --collection=h [--confirm=h]` | Rebuild beside the live version, then swap |
 | `typesense-sync/analytics/status\|apply\|report\|create-events-key\|remove` | See [Analytics](#analytics); `--dry-run`, `--limit` |
+| `typesense-sync/rules/export <collection> [--file=path]` | Write a collection's rules and synonyms as JSON |
+| `typesense-sync/rules/import <file> [--confirm=h]` | Replace a collection's rules and synonyms with an export's |
+| `typesense-sync/rules/adopt <collection> --curation-set=n\|--synonym-set=n` | Copy a hand-made set in, then unlink it |
+| `typesense-sync/rules/prune <collection> [--confirm=h]` | Delete the rows of a collection no longer declared |
 
-Flush and recreate ask you to type the collection's handle, or take it as `--confirm=<handle>` in
+`setup`, `collections/apply` and `collections/status` include each collection's rule and synonym sets.
+
+Flush, recreate, import and prune ask you to type the collection's handle, or take it as `--confirm=<handle>` in
 scripts. A non-interactive run without `--confirm` is refused.
 
 **Exit codes:** `0` success; `78` a configuration problem, or nothing declared; `64` bad usage (an
@@ -564,8 +656,8 @@ Event::on(Search::class, Search::EVENT_DEFINE_SCOPED_KEY, function(DefineScopedK
 
 ### Services
 
-On `TypesenseSync::getInstance()`: `client`, `targets`, `sync`, `collections`, `search` and
-`analytics`. The methods named in this README are public API. Other public methods may change in a
+On `TypesenseSync::getInstance()`: `client`, `targets`, `sync`, `collections`, `search`,
+`analytics`, `rules` and `rulesTransfer`. The methods named in this README are public API. Other public methods may change in a
 minor release.
 
 ## Several environments, one cluster
@@ -576,6 +668,8 @@ minor release.
   another.
 - Analytics rule names follow the live name, so each environment's rules are its own, and `remove`
   never touches another's.
+- Rule and synonym set names follow the live name too, so each environment's rules are its own. Move
+  them between environments with `rules/export` and `rules/import`.
 
 ## Troubleshooting
 
@@ -592,8 +686,9 @@ minor release.
 
 ## Uninstalling
 
-Uninstalling removes the plugin's settings and stops the syncing. **It does not delete anything on
-the Typesense server.** The collections may be serving another environment. To remove them, first
+Uninstalling removes the plugin's settings and its rules and synonyms tables, and stops the syncing.
+**It does not delete anything on the Typesense server.** The rule and synonym sets stay linked and
+keep applying to search, since removing them would change live results. The collections may be serving another environment. To remove them, first
 remove the analytics rules while the plugin is still installed:
 
 ```bash
@@ -608,7 +703,20 @@ curl -X DELETE "https://$TYPESENSE_HOST/aliases/prod_content"      -H "X-TYPESEN
 curl -X DELETE "https://$TYPESENSE_HOST/collections/prod_content_1" -H "X-TYPESENSE-API-KEY: $TYPESENSE_API_KEY"
 ```
 
-`GET /aliases` and `GET /collections` list what is there. Delete the search-only key and the events
+To remove the rule and synonym sets, **unlink them first**. Typesense refuses every search on a
+collection that links a deleted synonym set. Unlink them from the live version, then delete them:
+
+```bash
+curl -X PATCH "https://$TYPESENSE_HOST/collections/prod_content_1" -H "X-TYPESENSE-API-KEY: $TYPESENSE_API_KEY" \
+     -H "Content-Type: application/json" -d '{"curation_sets": [], "synonym_sets": []}'
+curl -X DELETE "https://$TYPESENSE_HOST/curation_sets/prod_content_rules"   -H "X-TYPESENSE-API-KEY: $TYPESENSE_API_KEY"
+curl -X DELETE "https://$TYPESENSE_HOST/synonym_sets/prod_content_synonyms" -H "X-TYPESENSE-API-KEY: $TYPESENSE_API_KEY"
+```
+
+Leave out of the PATCH any set someone else linked that should stay. Deleting the collection itself
+removes its links too.
+
+`GET /aliases`, `GET /collections`, `GET /curation_sets` and `GET /synonym_sets` list what is there. Delete the search-only key and the events
 key through `/keys` if nothing else uses them.
 
 ## Support

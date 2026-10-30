@@ -13,13 +13,16 @@ use craft\events\RegisterCpNavItemsEvent;
 use craft\events\RegisterUrlRulesEvent;
 use craft\events\RegisterUserPermissionsEvent;
 use craft\fieldlayoutelements\entries\EntryTitleField;
+use craft\helpers\Cp as CpHelper;
 use craft\helpers\Db;
 use craft\helpers\ElementHelper;
+use craft\helpers\UrlHelper;
 use craft\models\EntryType;
 use craft\models\FieldLayout;
 use craft\models\FieldLayoutTab;
 use craft\models\Section;
 use craft\models\Section_SiteSettings;
+use craft\models\Site;
 use craft\services\UserPermissions;
 use craft\web\Request;
 use craft\web\TemplateResponseBehavior;
@@ -28,6 +31,7 @@ use craft\web\UrlManager;
 use craft\web\UrlRule;
 use craft\web\View;
 use DateTime;
+use ReflectionProperty;
 use Throwable;
 use Typesense\Client as TypesenseClient;
 use webdna\typesensesync\jobs\PushRules;
@@ -444,6 +448,40 @@ class RulesControllerTest extends Unit
         );
         $this->assertStringStartsWith('from ', $rows[0]['dates']);
         $this->assertSame([1, 0], [$rows[0]['pins'], $rows[0]['hides']]);
+    }
+
+    public function testARowLinksToItsEditScreenWhenCpUrlsCarryAQueryString(): void
+    {
+        // On a multi-site install cpUrl() ends in `?site=<handle>`, so a row's id must be part of
+        // the path it is given, never appended after it (found in the craft5 browser pass).
+        $user = $this->user(['accessCp', TypesenseSync::PERMISSION_RULES], true);
+        $rule = $this->savedRule('garden');
+        $group = $this->savedGroup(['care home', 'nursing home']);
+        $sites = Craft::$app->getSites();
+        $second = new Site([
+            'groupId' => $sites->getPrimarySite()->groupId,
+            'name' => 'Second',
+            'handle' => 'second' . bin2hex(random_bytes(3)),
+            'language' => 'en-US',
+            'hasUrls' => false,
+        ]);
+        $this->assertTrue($sites->saveSite($second), implode(' ', $second->getFirstErrors()));
+        $requested = new ReflectionProperty(CpHelper::class, '_requestedSite');
+
+        try {
+            Craft::$app->getUser()->setIdentity($user);
+            $requested->setValue(null, null);
+            $this->assertStringContainsString('site=', UrlHelper::cpUrl('typesense'), 'the CP URL carries the site');
+            $rules = $this->variables($this->dispatch('rules/index', ['collection' => 'content'], $user, ['method' => 'GET']))['tableData'];
+            $synonyms = $this->variables($this->dispatch('synonyms/index', ['collection' => 'content'], $user, ['method' => 'GET']))['tableData'];
+
+            $this->assertSame(UrlHelper::cpUrl('typesense/content/rules/' . $rule->id), $rules[0]['url']);
+            $this->assertSame(UrlHelper::cpUrl('typesense/content/synonyms/' . $group->id), $synonyms[0]['url']);
+        } finally {
+            $sites->deleteSite($second);
+            $requested->setValue(null, null);
+            Db::delete(Table::QUEUE);
+        }
     }
 
     public function testTheBannerShowsDriftAndTheNextSaveClearsIt(): void
