@@ -1,6 +1,6 @@
 # Release Notes for Typesense Sync
 
-## 1.1.0 - 2026-10-30
+## 1.1.0 - 2026-11-05
 
 ### Added
 - A **Typesense** section in the control panel, with a page per declared collection, where editors manage rules and synonyms. It needs the new *Manage Typesense rules* permission and appears only while the connection is configured.
